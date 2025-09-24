@@ -1,0 +1,75 @@
+const mongoose = require('mongoose');
+
+const userSchema = new mongoose.Schema(
+    {
+        firstName: { type: String, trim: true, required: true },
+        lastName: { type: String, trim: true, required: true },
+        email: { type: String, trim: true, lowercase: true, unique: true, required: true },
+        phone: { type: String, trim: true },
+        serviceAddress: { type: String, trim: true },
+        passwordHash: { type: String, required: true },
+        type: { type: String, enum: ['NBN', 'MBL', 'MBB', 'SME'], default: 'NBN' },
+        // MBL specific fields (optional)
+        mblSelectedNumber: { type: String, trim: true },
+        mblKeepExistingNumber: { type: Boolean, default: false },
+        mblCurrentMobileNumber: { type: String, trim: true },
+        mblCurrentProvider: { type: String, trim: true },
+        otpVerified: { type: Boolean, default: true },
+        // General user fields
+        dateOfBirth: { type: String, trim: true },
+        // Identity verification (Driver's Licence etc.)
+        identity: {
+            idType: { type: String, trim: true },
+            firstName: { type: String, trim: true },
+            lastName: { type: String, trim: true },
+            dateOfBirth: { type: String, trim: true },
+            licenceNumber: { type: String, trim: true },
+            stateOfIssue: { type: String, trim: true },
+            passportNumber: { type: String, trim: true },
+            countryOfIssue: { type: String, trim: true },
+            medicareCardNumber: { type: String, trim: true },
+            IRN: { type: String, trim: true },
+            expiryDate: { type: String, trim: true },
+            verified: { type: Boolean, default: false },
+        },
+
+        businessDetails: {
+            businessName: { type: String, trim: true },
+            businessAddress: { type: String, trim: true },
+            businessType: { type: String, trim: true },
+            ABN: { type: String, trim: true },
+            primaryContact: {
+                firstName: { type: String, trim: true },
+                lastName: { type: String, trim: true },
+                phone: { type: String, trim: true },
+                email: { type: String, trim: true },
+            }
+        },
+        simType: { type: String, enum: ['eSim', 'physical'], default: 'eSim' },
+    },
+    { timestamps: true }
+);
+
+userSchema.methods.toSafeJSON = function () {
+    return {
+        id: this._id,
+        firstName: this.firstName,
+        lastName: this.lastName,
+        email: this.email,
+        phone: this.phone,
+        serviceAddress: this.serviceAddress,
+        type: this.type,
+        mblSelectedNumber: this.mblSelectedNumber,
+        mblKeepExistingNumber: this.mblKeepExistingNumber,
+        mblCurrentMobileNumber: this.mblCurrentMobileNumber,
+        mblCurrentProvider: this.mblCurrentProvider,
+        otpVerified: this.otpVerified,
+        dateOfBirth: this.dateOfBirth,
+        identity: this.identity,
+        simType: this.simType,
+        createdAt: this.createdAt,
+        updatedAt: this.updatedAt,
+    };
+};
+
+module.exports = mongoose.model('User', userSchema);
