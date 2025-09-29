@@ -4,6 +4,7 @@ const cors = require('cors');
 const { connectToDatabase } = require('./config/db');
 const healthRouter = require('./routes/health');
 const authRouter = require('./routes/auth');
+const stripeRouter = require('./routes/stripe');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -15,6 +16,7 @@ app.use(express.json());
 // Routes
 app.use('/api', healthRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/stripe', stripeRouter);
 
 // 404 and Error handling
 app.use(notFoundHandler);
