@@ -105,7 +105,7 @@ router.post('/otp/verify', [body('phone').isString().trim(), body('code').isStri
 
 router.post(
     '/login',
-    [body('email').isEmail().normalizeEmail(), body('password').isString().notEmpty()],
+    [body('email').isEmail(), body('password').isString().notEmpty()],
     async (req, res, next) => {
         try {
             const errors = validationResult(req);
