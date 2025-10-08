@@ -14,7 +14,9 @@ const userSchema = new mongoose.Schema(
         mblKeepExistingNumber: { type: Boolean, default: false },
         mblCurrentMobileNumber: { type: String, trim: true },
         mblCurrentProvider: { type: String, trim: true },
-        otpVerified: { type: Boolean, default: true },
+        otpVerified: { type: Boolean, default: false },
+        otp: { type: String },
+        otpExpiry: { type: Date },
         // General user fields
         dateOfBirth: { type: String, trim: true },
         // Identity verification (Driver's Licence etc.)
@@ -23,14 +25,24 @@ const userSchema = new mongoose.Schema(
             firstName: { type: String, trim: true },
             lastName: { type: String, trim: true },
             dateOfBirth: { type: String, trim: true },
+            // Driver's Licence fields
             licenceNumber: { type: String, trim: true },
             stateOfIssue: { type: String, trim: true },
+            // Passport fields
             passportNumber: { type: String, trim: true },
             countryOfIssue: { type: String, trim: true },
+            // Medical Card fields
             medicareCardNumber: { type: String, trim: true },
             IRN: { type: String, trim: true },
             expiryDate: { type: String, trim: true },
+            // Verification status
             verified: { type: Boolean, default: false },
+            verificationDate: { type: Date },
+            verificationProvider: { type: String, trim: true },
+            verificationConfidence: { type: Number, min: 0, max: 100 },
+            verificationDetails: { type: Object },
+            verificationAttempts: { type: Number, default: 0 },
+            lastVerificationAttempt: { type: Date },
         },
 
         businessDetails: {
