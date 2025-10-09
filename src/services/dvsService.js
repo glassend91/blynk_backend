@@ -41,6 +41,8 @@ class DVSService {
                     return await this.verifyWithVeryfi(documentData);
                 case 'azure':
                     return await this.verifyWithAzure(documentData);
+                case 'mock':
+                    return await this.verifyWithMock(documentData);
                 default:
                     throw new Error(`Unsupported DVS provider: ${this.provider}`);
             }
@@ -191,6 +193,38 @@ class DVSService {
     }
 
     /**
+     * Mock verification for testing (always returns success)
+     */
+    async verifyWithMock(documentData) {
+        // Simulate API delay
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Always return success for testing
+        return {
+            success: true,
+            verified: true,
+            confidence: 95,
+            extractedData: {
+                firstName: documentData.firstName,
+                lastName: documentData.lastName,
+                dateOfBirth: documentData.dateOfBirth,
+                documentNumber: documentData.documentNumber,
+                documentType: this.providerConfig.supportedDocuments[documentData.idType]
+            },
+            verificationDetails: {
+                passed: true,
+                confidence: 95,
+                provider: 'mock'
+            },
+            rawResponse: {
+                status: 'success',
+                message: 'Mock verification successful',
+                provider: 'mock'
+            }
+        };
+    }
+
+    /**
      * Validate document data
      */
     validateDocumentData(documentData) {
@@ -235,18 +269,32 @@ class DVSService {
      */
     parseIDAnalyzerResponse(data) {
         console.log('ID Analyzer Response:', data);
+
+        // Check if we have a successful result
+        const hasResult = data.result && Object.keys(data.result).length > 0;
+        const matchRate = data.matchrate || 0;
+
         return {
-            success: data.status === 'success',
-            verified: data.verification && data.verification.passed,
-            confidence: data.confidence || 0,
+            success: hasResult,
+            verified: hasResult && matchRate > 0.8, // 80% match rate threshold
+            confidence: Math.round(matchRate * 100),
             extractedData: {
-                firstName: data.firstName,
-                lastName: data.lastName,
-                dateOfBirth: data.dateOfBirth,
-                documentNumber: data.documentNumber,
-                documentType: data.documentType
+                firstName: data.result?.firstName,
+                lastName: data.result?.lastName,
+                dateOfBirth: data.result?.dob,
+                documentNumber: data.result?.documentNumber,
+                documentType: data.result?.documentType,
+                fullName: data.result?.fullName,
+                expiry: data.result?.expiry,
+                nationality: data.result?.nationality_full
             },
-            verificationDetails: data.verification || {},
+            verificationDetails: {
+                matchRate: matchRate,
+                documentType: data.result?.documentType,
+                issuerOrg: data.result?.issuerOrg_full,
+                nationality: data.result?.nationality_full,
+                daysToExpiry: data.result?.daysToExpiry
+            },
             rawResponse: data
         };
     }

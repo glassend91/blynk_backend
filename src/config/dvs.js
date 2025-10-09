@@ -1,7 +1,7 @@
 // DVS (Document Verification Service) Configuration
 const dvsConfig = {
     // Primary DVS Provider Configuration
-    provider: process.env.DVS_PROVIDER || 'idanalyzer', // 'idanalyzer', 'idscan', 'veryfi', 'azure'
+    provider: process.env.DVS_PROVIDER || 'idanalyzer', // 'idanalyzer', 'idscan', 'veryfi', 'azure', 'mock'
 
     // ID Analyzer Configuration
     idanalyzer: {
@@ -48,6 +48,15 @@ const dvsConfig = {
         supportedDocuments: {
             'Driver\'s Licence': 'drivers_license',
             'Passport': 'passport'
+        }
+    },
+
+    // Mock Provider for Testing
+    mock: {
+        supportedDocuments: {
+            'Driver\'s Licence': 'drivers_license',
+            'Passport': 'passport',
+            'Medical Card': 'medicare_card'
         }
     },
 

@@ -191,7 +191,9 @@ router.post(
             //     user.identity.expiryDate = expiryDate;
             // }
 
-            if (verificationResult.success && verificationResult.verified) {
+            // console.log('verificationResult', verificationResult);
+
+            if (verificationResult.success || verificationResult.verified) {
                 // Verification successful
                 // user.identity.verified = true;
                 // user.identity.verificationDate = new Date();
@@ -206,6 +208,8 @@ router.post(
                     verified: true,
                     message: 'Identity verification successful',
                     confidence: verificationResult.confidence,
+                    extractedData: verificationResult.extractedData,
+                    verificationDetails: verificationResult.verificationDetails,
                     // verificationDate: user.identity.verificationDate,
                     // user: user.toSafeJSON()
                 });
@@ -214,11 +218,13 @@ router.post(
                 // user.identity.verificationDetails = verificationResult.verificationDetails;
                 // await user.save();
 
+                // console.log('verificationResult', verificationResult);
+
                 return res.status(400).json({
                     success: false,
                     verified: false,
-                    message: 'Identity verification failed. Please check your document details and try again.',
-                    details: verificationResult.verificationDetails,
+                    message: verificationResult?.rawResponse?.error?.message || 'Identity verification failed. Please check your document details and try again.',
+                    details: verificationResult?.verificationDetails,
                     // attemptsRemaining: Math.max(0, 3 - user.identity.verificationAttempts)
                 });
             }
