@@ -58,6 +58,22 @@ const userSchema = new mongoose.Schema(
             }
         },
         simType: { type: String, enum: ['eSim', 'physical'], default: 'eSim' },
+        // Address information (optional)
+        addressInformation: {
+            streetAddress: { type: String, trim: true },
+            suburb: { type: String, trim: true },
+            city: { type: String, trim: true },
+            state: { type: String, trim: true },
+            country: { type: String, trim: true },
+            postcode: { type: String, trim: true },
+        },
+        // Notification preferences
+        twoFactorAuthentication: { type: Boolean, default: true },
+        emailNotifications: { type: Boolean, default: true },
+        smsNotifications: { type: Boolean, default: true },
+        marketingCommunications: { type: Boolean, default: true },
+        serviceUpdates: { type: Boolean, default: true },
+        billingNotifications: { type: Boolean, default: true },
     },
     { timestamps: true }
 );
@@ -79,6 +95,13 @@ userSchema.methods.toSafeJSON = function () {
         dateOfBirth: this.dateOfBirth,
         identity: this.identity,
         simType: this.simType,
+        addressInformation: this.addressInformation,
+        twoFactorAuthentication: this.twoFactorAuthentication,
+        emailNotifications: this.emailNotifications,
+        smsNotifications: this.smsNotifications,
+        marketingCommunications: this.marketingCommunications,
+        serviceUpdates: this.serviceUpdates,
+        billingNotifications: this.billingNotifications,
         createdAt: this.createdAt,
         updatedAt: this.updatedAt,
     };

@@ -365,6 +365,155 @@ router.get('/me', authRequired, async (req, res, next) => {
     }
 });
 
+// Update user profile
+router.put(
+    '/update',
+    authRequired,
+    [
+        body('firstName').optional().isString().trim().notEmpty(),
+        body('lastName').optional().isString().trim().notEmpty(),
+        body('phone').optional().isString().trim(),
+        body('serviceAddress').optional().isString().trim(),
+        body('type').optional().isIn(['NBN', 'MBL', 'MBB', 'SME']),
+        body('mblSelectedNumber').optional().isString().trim(),
+        body('mblKeepExistingNumber').optional().isBoolean(),
+        body('mblCurrentMobileNumber').optional().isString().trim(),
+        body('mblCurrentProvider').optional().isString().trim(),
+        body('dateOfBirth').optional().isString().trim(),
+        body('identity').optional().isObject(),
+        body('businessDetails').optional().isObject(),
+        body('simType').optional().isIn(['eSim', 'physical']),
+        // Address information validation
+        body('addressInformation.streetAddress').optional().isString().trim(),
+        body('addressInformation.suburb').optional().isString().trim(),
+        body('addressInformation.city').optional().isString().trim(),
+        body('addressInformation.state').optional().isString().trim(),
+        body('addressInformation.country').optional().isString().trim(),
+        body('addressInformation.postcode').optional().isString().trim(),
+        // Notification preferences validation
+        body('twoFactorAuthentication').optional().isBoolean(),
+        body('emailNotifications').optional().isBoolean(),
+        body('smsNotifications').optional().isBoolean(),
+        body('marketingCommunications').optional().isBoolean(),
+        body('serviceUpdates').optional().isBoolean(),
+        body('billingNotifications').optional().isBoolean(),
+    ],
+    async (req, res, next) => {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    errors: errors.array()
+                });
+            }
+
+            const user = await User.findById(req.userId);
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found'
+                });
+            }
+
+            // Fields that can be updated
+            const allowedFields = [
+                'firstName',
+                'lastName',
+                'phone',
+                'serviceAddress',
+                'type',
+                'mblSelectedNumber',
+                'mblKeepExistingNumber',
+                'mblCurrentMobileNumber',
+                'mblCurrentProvider',
+                'dateOfBirth',
+                'identity',
+                'businessDetails',
+                'simType',
+                'addressInformation',
+                'twoFactorAuthentication',
+                'emailNotifications',
+                'smsNotifications',
+                'marketingCommunications',
+                'serviceUpdates',
+                'billingNotifications'
+            ];
+
+            // Update only provided fields
+            allowedFields.forEach(field => {
+                if (req.body.hasOwnProperty(field)) {
+                    user[field] = req.body[field];
+                }
+            });
+
+            await user.save();
+
+            return res.json({
+                success: true,
+                message: 'User profile updated successfully',
+                user: user.toSafeJSON()
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+);
+
+// Change password
+router.put(
+    '/change-password',
+    authRequired,
+    [
+        body('currentPassword').isString().notEmpty().withMessage('Current password is required'),
+        body('newPassword').isLength({ min: 6 }).withMessage('New password must be at least 6 characters long')
+    ],
+    async (req, res, next) => {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    errors: errors.array()
+                });
+            }
+
+            const { currentPassword, newPassword } = req.body;
+
+            const user = await User.findById(req.userId);
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found'
+                });
+            }
+
+            // Verify current password
+            const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.passwordHash);
+            if (!isCurrentPasswordValid) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Current password is incorrect'
+                });
+            }
+
+            // Hash new password
+            const newPasswordHash = await bcrypt.hash(newPassword, 10);
+
+            // Update password
+            user.passwordHash = newPasswordHash;
+            await user.save();
+
+            return res.json({
+                success: true,
+                message: 'Password changed successfully'
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+);
+
 // Check if email already exists
 router.post(
     '/check-email',
