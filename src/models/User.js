@@ -8,6 +8,7 @@ const userSchema = new mongoose.Schema(
         phone: { type: String, trim: true },
         serviceAddress: { type: String, trim: true },
         passwordHash: { type: String, required: true },
+        role: { type: String, enum: ['customer', 'admin', 'support'], default: 'customer' },
         type: { type: String, enum: ['NBN', 'MBL', 'MBB', 'SME'], default: 'NBN' },
         // MBL specific fields (optional)
         mblSelectedNumber: { type: String, trim: true },

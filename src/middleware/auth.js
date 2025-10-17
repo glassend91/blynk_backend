@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const User = require('../models/User');
 
 /**
  * Middleware to require authentication
@@ -6,7 +7,7 @@ const jwt = require('jsonwebtoken');
  * @param {Object} res - Express response object
  * @param {Function} next - Express next function
  */
-function authRequired(req, res, next) {
+async function authenticateToken(req, res, next) {
     const authHeader = req.headers.authorization || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
@@ -20,7 +21,24 @@ function authRequired(req, res, next) {
     try {
         const secret = process.env.JWT_SECRET || 'dev_secret_change_me';
         const payload = jwt.verify(token, secret);
-        req.userId = payload.sub;
+
+        // Fetch user details from database
+        const user = await User.findById(payload.sub);
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        // Attach user info to request
+        req.user = {
+            id: user._id,
+            email: user.email,
+            role: user.role || 'customer', // Default role is customer
+            ...user.toSafeJSON()
+        };
+
         next();
     } catch (err) {
         return res.status(401).json({
@@ -30,4 +48,23 @@ function authRequired(req, res, next) {
     }
 }
 
-module.exports = authRequired;
+/**
+ * Middleware to require admin role
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Function} next - Express next function
+ */
+function requireAdmin(req, res, next) {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({
+            success: false,
+            message: 'Admin access required'
+        });
+    }
+    next();
+}
+
+module.exports = {
+    authenticateToken,
+    requireAdmin
+};

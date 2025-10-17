@@ -3,7 +3,7 @@ const multer = require('multer');
 const { body, validationResult } = require('express-validator');
 const User = require('../../models/User');
 const dvsService = require('../../services/dvsService');
-const authRequired = require('../../middleware/auth');
+const { authenticateToken } = require('../../middleware/auth');
 
 const router = express.Router();
 
@@ -48,7 +48,7 @@ router.get('/supported-documents', (req, res) => {
 // Verify identity document
 router.post(
     '/verify',
-    // authRequired,
+    // authenticateToken,
     upload.single('documentImage'),
     [
         body('idType').isIn(['Driver\'s Licence', 'Passport', 'Medical Card', 'I', 'PASSPORT', 'DRIVERS_LICENCE']).withMessage('Invalid document type'),
@@ -83,7 +83,7 @@ router.post(
                 });
             }
 
-            // const userId = req.userId;
+            // const userId = req.user.id;
             // const user = await User.findById(userId);
             // if (!user) {
             //     return res.status(404).json({
@@ -237,9 +237,9 @@ router.post(
 );
 
 // Get user's identity verification status
-router.get('/status', authRequired, async (req, res, next) => {
+router.get('/status', authenticateToken, async (req, res, next) => {
     try {
-        const userId = req.userId;
+        const userId = req.user.id;
         const user = await User.findById(userId).select('identity');
 
         if (!user) {
@@ -269,9 +269,9 @@ router.get('/status', authRequired, async (req, res, next) => {
 });
 
 // Reset identity verification (admin only - for testing purposes)
-router.post('/reset', authRequired, async (req, res, next) => {
+router.post('/reset', authenticateToken, async (req, res, next) => {
     try {
-        const userId = req.userId;
+        const userId = req.user.id;
         const user = await User.findById(userId);
 
         if (!user) {

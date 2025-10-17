@@ -1,0 +1,408 @@
+const supportTicketService = require('../services/supportTicketService');
+const { validationResult } = require('express-validator');
+
+class SupportTicketController {
+    // Create a new support ticket
+    async createTicket(req, res) {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Validation failed',
+                    errors: errors.array()
+                });
+            }
+
+            const ticketData = {
+                subject: req.body.subject,
+                description: req.body.description,
+                category: req.body.category,
+                priority: req.body.priority,
+                customerId: req.user.id, // Assuming user is authenticated
+                tags: req.body.tags,
+                source: req.body.source
+            };
+
+            const ticket = await supportTicketService.createTicket(ticketData);
+
+            res.status(201).json({
+                success: true,
+                message: 'Support ticket created successfully',
+                data: ticket.toSafeJSON()
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+    // Get all tickets with filtering and pagination
+    async getTickets(req, res) {
+        try {
+            const {
+                status,
+                category,
+                priority,
+                assignedTo,
+                search,
+                page = 1,
+                limit = 10
+            } = req.query;
+
+            const filters = {};
+            if (status) filters.status = status;
+            if (category) filters.category = category;
+            if (priority) filters.priority = priority;
+            if (assignedTo) filters.assignedTo = assignedTo;
+
+            // If user is not admin, only show their tickets
+            if (req.user.role !== 'admin') {
+                filters.customerId = req.user.id;
+            }
+
+            const result = await supportTicketService.getTickets(
+                filters,
+                parseInt(page),
+                parseInt(limit)
+            );
+
+            res.status(200).json({
+                success: true,
+                data: {
+                    tickets: result.tickets.map(ticket => ticket.toSafeJSON()),
+                    pagination: result.pagination
+                }
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+    // Get ticket by ID
+    async getTicketById(req, res) {
+        try {
+            const { id } = req.params;
+            const ticket = await supportTicketService.getTicketById(id);
+
+            // Check if user has permission to view this ticket
+            if (req.user.role !== 'admin' && ticket.customer._id.toString() !== req.user.id) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access denied'
+                });
+            }
+
+            res.status(200).json({
+                success: true,
+                data: ticket.toSafeJSON()
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+
+    // Update ticket
+    async updateTicket(req, res) {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Validation failed',
+                    errors: errors.array()
+                });
+            }
+
+            const { id } = req.params;
+            const updateData = req.body;
+
+            // Non-admin users can only update certain fields
+            if (req.user.role !== 'admin') {
+                const allowedFields = ['priority', 'tags'];
+                const filteredData = {};
+                allowedFields.forEach(field => {
+                    if (updateData[field] !== undefined) {
+                        filteredData[field] = updateData[field];
+                    }
+                });
+                updateData = filteredData;
+            }
+
+            const ticket = await supportTicketService.updateTicket(id, updateData);
+
+            res.status(200).json({
+                success: true,
+                message: 'Ticket updated successfully',
+                data: ticket.toSafeJSON()
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+    // Add message to ticket
+    async addMessage(req, res) {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Validation failed',
+                    errors: errors.array()
+                });
+            }
+
+            const { id } = req.params;
+            const messageData = {
+                senderId: req.user.id,
+                content: req.body.content,
+                isFromAdmin: req.user.role === 'admin',
+                attachments: req.body.attachments || []
+            };
+
+            const ticket = await supportTicketService.addMessage(id, messageData);
+
+            res.status(200).json({
+                success: true,
+                message: 'Message added successfully',
+                data: ticket.toSafeJSON()
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+    // Assign ticket to admin
+    async assignTicket(req, res) {
+        try {
+            if (req.user.role !== 'admin') {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Admin access required'
+                });
+            }
+
+            const { id } = req.params;
+            const { adminId } = req.body;
+
+            const ticket = await supportTicketService.assignTicket(id, adminId);
+
+            res.status(200).json({
+                success: true,
+                message: 'Ticket assigned successfully',
+                data: ticket.toSafeJSON()
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+    // Close ticket
+    async closeTicket(req, res) {
+        try {
+            if (req.user.role !== 'admin') {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Admin access required'
+                });
+            }
+
+            const { id } = req.params;
+            const ticket = await supportTicketService.closeTicket(id, req.user.id);
+
+            res.status(200).json({
+                success: true,
+                message: 'Ticket closed successfully',
+                data: ticket.toSafeJSON()
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+    // Get ticket statistics
+    async getStatistics(req, res) {
+        try {
+            if (req.user.role !== 'admin') {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Admin access required'
+                });
+            }
+
+            const stats = await supportTicketService.getStatistics();
+
+            // Format response time to hours
+            if (stats.avgResponseTime) {
+                stats.avgResponseTimeHours = Math.round(stats.avgResponseTime / (1000 * 60 * 60) * 100) / 100;
+            }
+
+            res.status(200).json({
+                success: true,
+                data: stats
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+    // Get customer tickets
+    async getCustomerTickets(req, res) {
+        try {
+            const { customerId } = req.params;
+            const { page = 1, limit = 10 } = req.query;
+
+            // Check if user has permission to view these tickets
+            if (req.user.role !== 'admin' && customerId !== req.user.id) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access denied'
+                });
+            }
+
+            const result = await supportTicketService.getCustomerTickets(
+                customerId,
+                parseInt(page),
+                parseInt(limit)
+            );
+
+            res.status(200).json({
+                success: true,
+                data: {
+                    tickets: result.tickets.map(ticket => ticket.toSafeJSON()),
+                    pagination: result.pagination
+                }
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+    // Search tickets
+    async searchTickets(req, res) {
+        try {
+            const { q, page = 1, limit = 10 } = req.query;
+            const filters = {};
+
+            // If user is not admin, only search their tickets
+            if (req.user.role !== 'admin') {
+                filters.customerId = req.user.id;
+            }
+
+            const result = await supportTicketService.searchTickets(
+                q,
+                filters,
+                parseInt(page),
+                parseInt(limit)
+            );
+
+            res.status(200).json({
+                success: true,
+                data: {
+                    tickets: result.tickets.map(ticket => ticket.toSafeJSON()),
+                    pagination: result.pagination
+                }
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+    // Rate ticket satisfaction
+    async rateTicket(req, res) {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Validation failed',
+                    errors: errors.array()
+                });
+            }
+
+            const { id } = req.params;
+            const { rating, feedback } = req.body;
+
+            // Check if user has permission to rate this ticket
+            const ticket = await supportTicketService.getTicketById(id);
+            if (req.user.role !== 'admin' && ticket.customer._id.toString() !== req.user.id) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access denied'
+                });
+            }
+
+            const updatedTicket = await supportTicketService.rateTicket(id, rating, feedback);
+
+            res.status(200).json({
+                success: true,
+                message: 'Rating submitted successfully',
+                data: updatedTicket.toSafeJSON()
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+    // Delete ticket (soft delete)
+    async deleteTicket(req, res) {
+        try {
+            if (req.user.role !== 'admin') {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Admin access required'
+                });
+            }
+
+            const { id } = req.params;
+            const ticket = await supportTicketService.deleteTicket(id);
+
+            res.status(200).json({
+                success: true,
+                message: 'Ticket deleted successfully',
+                data: ticket.toSafeJSON()
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+}
+
+module.exports = new SupportTicketController();
