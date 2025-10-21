@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User = require('../../models/User');
+const PackageSelection = require('../../models/PackageSelection');
 const { sendOTPEmail, sendWelcomeEmail } = require('../../utils/emailService');
 
 const router = express.Router();
@@ -359,7 +360,23 @@ router.get('/me', authRequired, async (req, res, next) => {
     try {
         const user = await User.findById(req.userId);
         if (!user) return res.status(404).json({ message: 'User not found' });
-        return res.json({ user: user.toSafeJSON() });
+
+        // Get user's selected packages
+        const selectedPackages = await PackageSelection.find({
+            customerId: req.userId,
+            status: 'active'
+        })
+            .populate('packageId')
+            .populate('packageId.providerId', 'firstName lastName email')
+            .sort({ selectedAt: -1 });
+
+        const userData = user.toSafeJSON();
+        userData.selectedPackages = selectedPackages;
+
+        return res.json({
+            user: userData,
+            selectedPackages: selectedPackages
+        });
     } catch (err) {
         next(err);
     }

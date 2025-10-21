@@ -7,6 +7,7 @@ const authRouter = require('./routes/auth');
 const stripeRouter = require('./routes/stripe');
 const identityRouter = require('./routes/identity');
 const supportTicketsRouter = require('./routes/supportTickets');
+const packagesRouter = require('./routes/packages');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -21,6 +22,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/stripe', stripeRouter);
 app.use('/api/identity', identityRouter);
 app.use('/api/support-tickets', supportTicketsRouter);
+app.use('/api/packages', packagesRouter);
 
 // 404 and Error handling
 app.use(notFoundHandler);
