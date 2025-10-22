@@ -1,0 +1,183 @@
+const express = require('express');
+const { body, validationResult } = require('express-validator');
+const ServiceController = require('../controllers/serviceController');
+const { authenticateToken } = require('../middleware/auth');
+
+const router = express.Router();
+
+// Apply authentication to all routes
+router.use(authenticateToken);
+
+// Validation middleware
+const validateRequest = (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({
+            error: 'Validation failed',
+            details: errors.array()
+        });
+    }
+    next();
+};
+
+// Get all available services with optional filtering
+router.get(
+    '/',
+    ServiceController.getServices
+);
+
+// Get service by ID
+router.get(
+    '/:serviceId',
+    ServiceController.getServiceById
+);
+
+// Subscribe to a service
+router.post(
+    '/:serviceId/subscribe',
+    [
+        body('assignedAddress.streetAddress')
+            .optional()
+            .isString()
+            .withMessage('Street address must be a string'),
+        body('assignedAddress.suburb')
+            .optional()
+            .isString()
+            .withMessage('Suburb must be a string'),
+        body('assignedAddress.city')
+            .optional()
+            .isString()
+            .withMessage('City must be a string'),
+        body('assignedAddress.state')
+            .optional()
+            .isString()
+            .withMessage('State must be a string'),
+        body('assignedAddress.postcode')
+            .optional()
+            .isString()
+            .withMessage('Postcode must be a string'),
+        body('assignedNumber')
+            .optional()
+            .isString()
+            .withMessage('Assigned number must be a string'),
+        body('selectedAddOns')
+            .optional()
+            .isArray()
+            .withMessage('Selected add-ons must be an array'),
+        body('paymentMethodId')
+            .optional()
+            .isMongoId()
+            .withMessage('Payment method ID must be a valid MongoDB ID')
+    ],
+    validateRequest,
+    ServiceController.subscribeToService
+);
+
+// Get user's subscriptions
+router.get(
+    '/subscriptions/my',
+    ServiceController.getUserSubscriptions
+);
+
+// Update subscription status (admin or user)
+router.put(
+    '/subscriptions/:subscriptionId/status',
+    [
+        body('status')
+            .isIn(['active', 'inactive', 'suspended', 'cancelled'])
+            .withMessage('Status must be one of: active, inactive, suspended, cancelled'),
+        body('reason')
+            .optional()
+            .isString()
+            .withMessage('Reason must be a string')
+    ],
+    validateRequest,
+    ServiceController.updateSubscriptionStatus
+);
+
+// Add add-on to subscription
+router.post(
+    '/subscriptions/:subscriptionId/add-ons',
+    [
+        body('addOnId')
+            .notEmpty()
+            .withMessage('Add-on ID is required')
+    ],
+    validateRequest,
+    ServiceController.addAddOn
+);
+
+// Remove add-on from subscription
+router.delete(
+    '/subscriptions/:subscriptionId/add-ons/:addOnId',
+    ServiceController.removeAddOn
+);
+
+// Update subscription configuration
+router.put(
+    '/subscriptions/:subscriptionId/config',
+    [
+        body('configuration.autoPay')
+            .optional()
+            .isBoolean()
+            .withMessage('Auto-pay must be a boolean'),
+        body('configuration.emailNotifications')
+            .optional()
+            .isBoolean()
+            .withMessage('Email notifications must be a boolean'),
+        body('configuration.smsNotifications')
+            .optional()
+            .isBoolean()
+            .withMessage('SMS notifications must be a boolean'),
+        body('configuration.usageAlerts')
+            .optional()
+            .isBoolean()
+            .withMessage('Usage alerts must be a boolean'),
+        body('configuration.usageThreshold')
+            .optional()
+            .isInt({ min: 0, max: 100 })
+            .withMessage('Usage threshold must be between 0 and 100')
+    ],
+    validateRequest,
+    ServiceController.updateSubscriptionConfig
+);
+
+// Cancel subscription
+router.post(
+    '/subscriptions/:subscriptionId/cancel',
+    [
+        body('reason')
+            .optional()
+            .isString()
+            .withMessage('Reason must be a string')
+    ],
+    validateRequest,
+    ServiceController.cancelSubscription
+);
+
+// Get subscription usage
+router.get(
+    '/subscriptions/:subscriptionId/usage',
+    ServiceController.getSubscriptionUsage
+);
+
+// Update subscription usage
+router.put(
+    '/subscriptions/:subscriptionId/usage',
+    [
+        body('amount')
+            .isFloat({ min: 0 })
+            .withMessage('Amount must be a positive number'),
+        body('type')
+            .isIn(['data', 'voice', 'sms'])
+            .withMessage('Type must be one of: data, voice, sms'),
+        body('note')
+            .optional()
+            .isString()
+            .withMessage('Note must be a string')
+    ],
+    validateRequest,
+    ServiceController.updateSubscriptionUsage
+);
+
+module.exports = router;

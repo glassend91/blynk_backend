@@ -68,6 +68,12 @@ const userSchema = new mongoose.Schema(
             country: { type: String, trim: true },
             postcode: { type: String, trim: true },
         },
+        // Stripe integration
+        stripeCustomerId: { type: String, trim: true },
+
+        // Payment and billing preferences
+        autoPayEnabled: { type: Boolean, default: false },
+
         // Notification preferences
         twoFactorAuthentication: { type: Boolean, default: true },
         emailNotifications: { type: Boolean, default: true },
