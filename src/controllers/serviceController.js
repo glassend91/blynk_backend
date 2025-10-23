@@ -2,6 +2,8 @@ const Service = require('../models/Service');
 const ServiceSubscription = require('../models/ServiceSubscription');
 const User = require('../models/User');
 const PaymentMethod = require('../models/PaymentMethod');
+const BillingAccount = require('../models/BillingAccount');
+const Invoice = require('../models/Invoice');
 
 class ServiceController {
     // Get all available services
@@ -197,6 +199,93 @@ class ServiceController {
             // Increment service subscription count
             await service.incrementSubscriptionCount();
 
+            // Create or update billing account
+            let billingAccount = await BillingAccount.findOne({ customerId: userId });
+            if (!billingAccount) {
+                billingAccount = new BillingAccount({
+                    customerId: userId,
+                    billingCycle: 'monthly',
+                    creditLimit: 1000,
+                    nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+                    autoPayEnabled: !!paymentMethod,
+                    defaultPaymentMethod: paymentMethod ? paymentMethod._id : null,
+                    status: 'active'
+                });
+                billingAccount.calculateNextBillingDate();
+                await billingAccount.save();
+                console.log('✅ Created billing account for user');
+            }
+
+            // Generate initial invoice for the subscription
+            try {
+                const invoiceNumber = await Invoice.generateInvoiceNumber();
+
+                // Validate service data
+                if (!service || (!service.name && !service.serviceName) || service.price === undefined) {
+                    console.error('Invalid service data for invoice creation:', service);
+                    throw new Error('Service data is invalid');
+                }
+
+                // Create line items
+                const lineItems = [{
+                    description: service.name || service.serviceName || 'Service Subscription',
+                    quantity: 1,
+                    unitPrice: service.price || 0,
+                    amount: service.price || 0,
+                    serviceId: service._id,
+                    subscriptionId: subscription._id
+                }];
+
+                // Add add-ons to line items if any
+                if (processedAddOns && processedAddOns.length > 0) {
+                    processedAddOns.forEach(addOn => {
+                        if (addOn && addOn.name && addOn.price !== undefined) {
+                            lineItems.push({
+                                description: addOn.name,
+                                quantity: 1,
+                                unitPrice: addOn.price,
+                                amount: addOn.price,
+                                serviceId: service._id,
+                                subscriptionId: subscription._id
+                            });
+                        }
+                    });
+                }
+
+                // Calculate totals
+                const subtotal = lineItems.reduce((sum, item) => sum + item.amount, 0);
+                const discount = 0; // No discount for initial subscription
+                const tax = subtotal * 0.10; // 10% GST
+                const total = subtotal + tax;
+
+                const invoice = new Invoice({
+                    invoiceNumber: invoiceNumber,
+                    customerId: userId,
+                    billingPeriod: {
+                        startDate: new Date(),
+                        endDate: expiresAt
+                    },
+                    dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+                    status: paymentMethod ? 'paid' : 'sent',
+                    subtotal: subtotal,
+                    discount: discount,
+                    tax: tax,
+                    total: total,
+                    currency: service.currency || 'AUD',
+                    lineItems: lineItems,
+                    paymentMethod: paymentMethod ? paymentMethod._id : null,
+                    paymentDate: paymentMethod ? new Date() : null,
+                    paymentReference: paymentMethod ? `PAY-${Date.now()}` : null,
+                    notes: `Initial subscription invoice for ${service.name || service.serviceName}`
+                });
+
+                await invoice.save();
+                console.log(`✅ Created invoice ${invoiceNumber} for service subscription: $${total.toFixed(2)}`);
+            } catch (invoiceError) {
+                console.error('Error creating initial invoice:', invoiceError);
+                // Don't fail the subscription if invoice creation fails
+            }
+
             // Populate subscription data
             await subscription.populate([
                 { path: 'serviceId' },
@@ -205,7 +294,12 @@ class ServiceController {
 
             res.status(201).json({
                 message: 'Successfully subscribed to service',
-                subscription: subscription.toObject()
+                subscription: subscription.toObject(),
+                billingAccount: billingAccount ? {
+                    id: billingAccount._id,
+                    nextBillingDate: billingAccount.nextBillingDate,
+                    autoPayEnabled: billingAccount.autoPayEnabled
+                } : null
             });
 
         } catch (error) {

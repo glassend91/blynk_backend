@@ -1,5 +1,7 @@
 const Package = require('../models/Package');
 const PackageSelection = require('../models/PackageSelection');
+const BillingAccount = require('../models/BillingAccount');
+const Invoice = require('../models/Invoice');
 const { validationResult } = require('express-validator');
 
 // Helper function to update package statistics
@@ -389,10 +391,80 @@ const selectPackage = async (req, res) => {
         // Update package customer count
         await updatePackageStats(id);
 
+        // Create or update billing account
+        let billingAccount = await BillingAccount.findOne({ customerId: userId });
+        if (!billingAccount) {
+            billingAccount = new BillingAccount({
+                customerId: userId,
+                billingCycle: 'monthly',
+                creditLimit: 1000,
+                nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+                autoPayEnabled: false,
+                status: 'active'
+            });
+            billingAccount.calculateNextBillingDate();
+            await billingAccount.save();
+            console.log('✅ Created billing account for package purchase');
+        }
+
+        // Generate invoice for package purchase
+        try {
+            const invoiceNumber = await Invoice.generateInvoiceNumber();
+
+            // Validate package data
+            if (!package || !package.planTitle || package.price === undefined) {
+                console.error('Invalid package data for invoice creation:', package);
+                throw new Error('Package data is invalid');
+            }
+
+            const subtotal = package.price || 0;
+            const discount = 0;
+            const tax = subtotal * 0.10; // 10% GST
+            const total = subtotal + tax;
+
+            const invoice = new Invoice({
+                invoiceNumber: invoiceNumber,
+                customerId: userId,
+                billingPeriod: {
+                    startDate: validFrom,
+                    endDate: validUntil
+                },
+                dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+                status: paymentStatus === 'paid' ? 'paid' : 'sent',
+                subtotal: subtotal,
+                discount: discount,
+                tax: tax,
+                total: total,
+                currency: package.currency || 'AUD',
+                lineItems: [{
+                    description: package.planTitle || 'Package Purchase',
+                    quantity: 1,
+                    unitPrice: package.price || 0,
+                    amount: package.price || 0,
+                    serviceId: package._id,
+                    subscriptionId: savedSelection._id
+                }],
+                paymentDate: paymentStatus === 'paid' ? new Date() : null,
+                paymentReference: paymentStatus === 'paid' ? `PAY-${Date.now()}` : null,
+                notes: `Package purchase: ${package.planTitle || 'Package'} (${package.validityDays || 0} days validity)`
+            });
+
+            await invoice.save();
+            console.log(`✅ Created invoice ${invoiceNumber} for package purchase: $${total.toFixed(2)}`);
+        } catch (invoiceError) {
+            console.error('Error creating package invoice:', invoiceError);
+            // Don't fail the package selection if invoice creation fails
+        }
+
         res.status(201).json({
             success: true,
             message: 'Package selected successfully',
-            data: savedSelection
+            data: savedSelection,
+            billingAccount: billingAccount ? {
+                id: billingAccount._id,
+                nextBillingDate: billingAccount.nextBillingDate,
+                autoPayEnabled: billingAccount.autoPayEnabled
+            } : null
         });
     } catch (error) {
         console.error('Error selecting package:', error);
