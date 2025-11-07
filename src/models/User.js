@@ -20,6 +20,7 @@ const userSchema = new mongoose.Schema(
         otpExpiry: { type: Date },
         // General user fields
         dateOfBirth: { type: String, trim: true },
+        billingAddress: { type: String, trim: true },
         // Identity verification (Driver's Licence etc.)
         identity: {
             idType: { type: String, trim: true },

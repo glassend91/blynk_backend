@@ -1,5 +1,5 @@
 const transporter = require('../config/email');
-const { getOTPEmailTemplate } = require('./emailTemplates');
+const { getOTPEmailTemplate, getOrderConfirmationTemplate } = require('./emailTemplates');
 
 /**
  * Send OTP email to user
@@ -73,8 +73,37 @@ async function sendWelcomeEmail(email, name) {
     }
 }
 
+/**
+ * Send order confirmation email to customer
+ * @param {string} email - Recipient email address
+ * @param {string} name - Customer's name
+ * @param {string} planName - Plan name
+ * @param {number} amount - Order amount
+ * @param {string} orderId - Order ID (optional)
+ * @returns {Promise} - Email sending result
+ */
+async function sendOrderConfirmationEmail(email, name, planName, amount, orderId = null) {
+    try {
+        const mailOptions = {
+            from: `"${process.env.EMAIL_FROM_NAME || 'Blynk'}" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: 'Your Order Confirmation - Blynk',
+            html: getOrderConfirmationTemplate(name, planName, amount, orderId),
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log('Order confirmation email sent successfully:', info.messageId);
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        console.error('Error sending order confirmation email:', error);
+        // Don't throw error for confirmation email, just log it
+        return { success: false, error: error.message };
+    }
+}
+
 module.exports = {
     sendOTPEmail,
     sendWelcomeEmail,
+    sendOrderConfirmationEmail,
 };
 

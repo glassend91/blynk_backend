@@ -67,8 +67,17 @@ class DVSService {
         // Add API key
         formData.append('apikey', this.providerConfig.apiKey);
 
+        // Normalize document type for mapping
+        let normalizedIdType = documentData.idType;
+        if (documentData.idType === 'Driver\'s Licence') {
+            normalizedIdType = 'Driver Licence';
+        } else if (documentData.idType === 'Medical Card') {
+            normalizedIdType = 'Medicare Card';
+        }
+        
         // Document type mapping
-        const documentType = this.providerConfig.supportedDocuments[documentData.idType];
+        const documentType = this.providerConfig.supportedDocuments[normalizedIdType] || 
+                            this.providerConfig.supportedDocuments[documentData.idType];
         if (documentType) {
             formData.append('document_type', documentType);
         }
@@ -79,9 +88,9 @@ class DVSService {
         formData.append('expected_dob', this.formatDateForAPI(documentData.dateOfBirth));
 
         // Add document-specific expected data
-        if (documentData.idType === 'Driver\'s Licence') {
+        if (normalizedIdType === 'Driver Licence') {
             formData.append('expected_licensenumber', documentData.documentNumber);
-        } else if (documentData.idType === 'Passport') {
+        } else if (normalizedIdType === 'Passport' || normalizedIdType === 'Visa') {
             formData.append('expected_passportnumber', documentData.documentNumber);
         }
 

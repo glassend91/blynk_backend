@@ -38,9 +38,17 @@ router.post(
         body('mblCurrentMobileNumber').optional().isString().trim(),
         body('mblCurrentProvider').optional().isString().trim(),
         body('dateOfBirth').optional().isString().trim(),
-        body('identity').optional().isObject(),
-        body('businessDetails').optional().isObject(),
+        body('billingAddress').optional().isString().trim(),
+        body('identity').optional().custom((value) => {
+            if (value === null || value === undefined) return true;
+            return typeof value === 'object' && !Array.isArray(value);
+        }).withMessage('Identity must be an object or null'),
+        body('businessDetails').optional().custom((value) => {
+            if (value === null || value === undefined) return true;
+            return typeof value === 'object' && !Array.isArray(value);
+        }).withMessage('Business details must be an object or null'),
         body('simType').optional().isIn(['eSim', 'physical']),
+        body('selectedPlan').optional().isObject().withMessage('Selected plan must be an object'),
     ],
     async (req, res, next) => {
         try {
@@ -62,9 +70,11 @@ router.post(
                 mblCurrentMobileNumber,
                 mblCurrentProvider,
                 dateOfBirth,
+                billingAddress,
                 identity,
                 businessDetails,
                 simType,
+                selectedPlan,
             } = req.body;
 
             console.log('body', req.body);
@@ -87,6 +97,7 @@ router.post(
                 mblCurrentMobileNumber,
                 mblCurrentProvider,
                 dateOfBirth,
+                billingAddress,
                 identity,
                 businessDetails,
                 simType,
@@ -95,6 +106,39 @@ router.post(
             });
 
             const token = createToken(user.id);
+
+            // Send order confirmation email for NBN, MBL, and MBB signups
+            if (type === 'NBN' || type === 'MBL' || type === 'MBB') {
+                try {
+                    const { sendOrderConfirmationEmail } = require('../../utils/emailService');
+                    // Use selected plan from request, fallback to default values
+                    let planName = 'Plan';
+                    let amount = 0;
+
+                    if (type === 'NBN') {
+                        planName = (selectedPlan && selectedPlan.name) ? selectedPlan.name : 'NBN Plan';
+                        amount = (selectedPlan && selectedPlan.price) ? selectedPlan.price : 69.99;
+                    } else if (type === 'MBL') {
+                        planName = (selectedPlan && selectedPlan.name) ? selectedPlan.name : 'Mobile Voice Plan';
+                        amount = (selectedPlan && selectedPlan.price) ? selectedPlan.price : 35.00;
+                    } else if (type === 'MBB') {
+                        planName = (selectedPlan && selectedPlan.name) ? selectedPlan.name : 'Mobile Broadband Plan';
+                        amount = (selectedPlan && selectedPlan.price) ? selectedPlan.price : 35.00;
+                    }
+
+                    await sendOrderConfirmationEmail(
+                        email,
+                        `${firstName} ${lastName}`,
+                        planName,
+                        amount,
+                        user.id.toString()
+                    );
+                } catch (emailError) {
+                    console.error('Error sending order confirmation email:', emailError);
+                    // Don't fail the signup if email fails
+                }
+            }
+
             return res.status(201).json({
                 token,
                 user: user.toSafeJSON(),
@@ -397,8 +441,14 @@ router.put(
         body('mblCurrentMobileNumber').optional().isString().trim(),
         body('mblCurrentProvider').optional().isString().trim(),
         body('dateOfBirth').optional().isString().trim(),
-        body('identity').optional().isObject(),
-        body('businessDetails').optional().isObject(),
+        body('identity').optional().custom((value) => {
+            if (value === null || value === undefined) return true;
+            return typeof value === 'object' && !Array.isArray(value);
+        }).withMessage('Identity must be an object or null'),
+        body('businessDetails').optional().custom((value) => {
+            if (value === null || value === undefined) return true;
+            return typeof value === 'object' && !Array.isArray(value);
+        }).withMessage('Business details must be an object or null'),
         body('simType').optional().isIn(['eSim', 'physical']),
         // Address information validation
         body('addressInformation.streetAddress').optional().isString().trim(),

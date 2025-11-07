@@ -51,17 +51,29 @@ router.post(
     // authenticateToken,
     upload.single('documentImage'),
     [
-        body('idType').isIn(['Driver\'s Licence', 'Passport', 'Medical Card', 'I', 'PASSPORT', 'DRIVERS_LICENCE']).withMessage('Invalid document type'),
+        body('idType').isIn([
+            'Driver Licence',
+            'Driver\'s Licence',
+            'Medicare Card',
+            'Medical Card',
+            'Passport',
+            'Visa',
+            'ImmiCard',
+            'Birth Certificate',
+            // Legacy formats for backward compatibility
+            'PASSPORT',
+            'DRIVERS_LICENCE',
+            'I'
+        ]).withMessage('Invalid document type'),
         body('firstName').isString().trim().notEmpty().withMessage('First name is required'),
         body('lastName').isString().trim().notEmpty().withMessage('Last name is required'),
         body('dateOfBirth').matches(/^\d{2}\/\d{2}\/\d{4}$/).withMessage('Date of birth must be in DD/MM/YYYY format'),
         body('documentNumber').isString().trim().notEmpty().withMessage('Document number is required'),
         // Document-specific validations
-        body('stateOfIssue').if(body('idType').equals('Driver\'s Licence')).isString().trim().notEmpty().withMessage('State of issue is required for Driver\'s Licence'),
-        body('countryOfIssue').if(body('idType').equals('Passport')).isString().trim().notEmpty().withMessage('Country of issue is required for Passport'),
-        body('medicareCardNumber').if(body('idType').equals('Medical Card')).isString().trim().notEmpty().withMessage('Medicare card number is required for Medical Card'),
-        body('IRN').if(body('idType').equals('Medical Card')).isString().trim().notEmpty().withMessage('IRN is required for Medical Card'),
-        body('expiryDate').if(body('idType').equals('Medical Card')).isString().trim().notEmpty().withMessage('Expiry date is required for Medical Card'),
+        body('stateOfIssue').if(body('idType').isIn(['Driver Licence', 'Driver\'s Licence', 'Birth Certificate'])).isString().trim().notEmpty().withMessage('State of issue is required'),
+        body('countryOfIssue').if(body('idType').isIn(['Passport', 'Visa'])).isString().trim().notEmpty().withMessage('Country of issue is required'),
+        body('cardNumber').if(body('idType').isIn(['Driver Licence', 'Driver\'s Licence'])).optional().isString().trim().withMessage('Card number must be a string'),
+        body('visaGrantNumber').if(body('idType').equals('Visa')).isString().trim().notEmpty().withMessage('Visa grant number is required for Visa'),
     ],
     async (req, res, next) => {
         try {
@@ -123,14 +135,23 @@ router.post(
                 documentNumber,
                 stateOfIssue,
                 countryOfIssue,
-                medicareCardNumber,
-                IRN,
-                expiryDate
+                cardNumber,
+                visaGrantNumber
             } = req.body;
+
+            // Normalize ID type (handle legacy formats)
+            let normalizedIdType = idType;
+            if (idType === 'Driver\'s Licence' || idType === 'DRIVERS_LICENCE') {
+                normalizedIdType = 'Driver Licence';
+            } else if (idType === 'Medical Card') {
+                normalizedIdType = 'Medicare Card';
+            } else if (idType === 'PASSPORT') {
+                normalizedIdType = 'Passport';
+            }
 
             // Prepare document data for DVS service
             const documentData = {
-                idType,
+                idType: normalizedIdType,
                 firstName,
                 lastName,
                 dateOfBirth,
@@ -140,11 +161,18 @@ router.post(
             };
 
             // Add document-specific data
-            switch (idType) {
-                case 'Driver\'s Licence':
+            switch (normalizedIdType) {
+                case 'Driver Licence':
                     documentData.additionalData = {
                         licenceNumber: documentNumber,
-                        stateOfIssue
+                        stateOfIssue,
+                        ...(cardNumber && { cardNumber })
+                    };
+                    break;
+                case 'Medicare Card':
+                    // Medicare card data is already in documentNumber
+                    documentData.additionalData = {
+                        medicareCardNumber: documentNumber
                     };
                     break;
                 case 'Passport':
@@ -153,11 +181,22 @@ router.post(
                         countryOfIssue
                     };
                     break;
-                case 'Medical Card':
+                case 'Visa':
                     documentData.additionalData = {
-                        medicareCardNumber,
-                        IRN,
-                        expiryDate
+                        passportNumber: documentNumber,
+                        countryOfIssue,
+                        visaGrantNumber
+                    };
+                    break;
+                case 'ImmiCard':
+                    documentData.additionalData = {
+                        immiCardNumber: documentNumber
+                    };
+                    break;
+                case 'Birth Certificate':
+                    documentData.additionalData = {
+                        registrationNumber: documentNumber,
+                        stateOfIssue
                     };
                     break;
             }

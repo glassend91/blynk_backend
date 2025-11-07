@@ -10,9 +10,14 @@ const dvsConfig = {
         endpoint: '',
         // Document types supported
         supportedDocuments: {
+            'Driver Licence': 'drivers_license',
             'Driver\'s Licence': 'drivers_license',
+            'Medicare Card': 'medicare_card',
+            'Medical Card': 'medicare_card',
             'Passport': 'passport',
-            'Medical Card': 'medicare_card'
+            'Visa': 'passport', // Visa uses passport document
+            'ImmiCard': 'id_card',
+            'Birth Certificate': 'birth_certificate'
         }
     },
 
@@ -22,9 +27,14 @@ const dvsConfig = {
         baseUrl: 'https://api.idscan.net',
         endpoint: '/v1/verify',
         supportedDocuments: {
+            'Driver Licence': 'drivers_license',
             'Driver\'s Licence': 'drivers_license',
+            'Medicare Card': 'medicare_card',
+            'Medical Card': 'medicare_card',
             'Passport': 'passport',
-            'Medical Card': 'medicare_card'
+            'Visa': 'passport',
+            'ImmiCard': 'id_card',
+            'Birth Certificate': 'birth_certificate'
         }
     },
 
@@ -35,8 +45,10 @@ const dvsConfig = {
         baseUrl: 'https://api.veryfi.com',
         endpoint: '/api/v8/documents',
         supportedDocuments: {
+            'Driver Licence': 'drivers_license',
             'Driver\'s Licence': 'drivers_license',
-            'Passport': 'passport'
+            'Passport': 'passport',
+            'Visa': 'passport'
         }
     },
 
@@ -46,17 +58,24 @@ const dvsConfig = {
         apiKey: process.env.AZURE_DOCUMENT_API_KEY,
         modelId: process.env.AZURE_DOCUMENT_MODEL_ID || 'prebuilt-idDocument',
         supportedDocuments: {
+            'Driver Licence': 'drivers_license',
             'Driver\'s Licence': 'drivers_license',
-            'Passport': 'passport'
+            'Passport': 'passport',
+            'Visa': 'passport'
         }
     },
 
     // Mock Provider for Testing
     mock: {
         supportedDocuments: {
+            'Driver Licence': 'drivers_license',
             'Driver\'s Licence': 'drivers_license',
+            'Medicare Card': 'medicare_card',
+            'Medical Card': 'medicare_card',
             'Passport': 'passport',
-            'Medical Card': 'medicare_card'
+            'Visa': 'passport',
+            'ImmiCard': 'id_card',
+            'Birth Certificate': 'birth_certificate'
         }
     },
 
