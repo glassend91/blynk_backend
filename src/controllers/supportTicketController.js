@@ -18,7 +18,8 @@ class SupportTicketController {
                 subject: req.body.subject,
                 description: req.body.description,
                 category: req.body.category,
-                priority: req.body.priority,
+                // Only allow admin to set priority, customers will get default "Medium"
+                priority: req.user.role === 'admin' ? req.body.priority : undefined,
                 customerId: req.user.id, // Assuming user is authenticated
                 tags: req.body.tags,
                 source: req.body.source
@@ -126,16 +127,16 @@ class SupportTicketController {
             const { id } = req.params;
             const updateData = req.body;
 
-            // Non-admin users can only update certain fields
+            // Non-admin users can only update certain fields (removed priority - only admins can set it)
             if (req.user.role !== 'admin') {
-                const allowedFields = ['priority', 'tags'];
+                const allowedFields = ['tags']; // Removed 'priority' - customers cannot set priority
                 const filteredData = {};
                 allowedFields.forEach(field => {
                     if (updateData[field] !== undefined) {
                         filteredData[field] = updateData[field];
                     }
                 });
-                updateData = filteredData;
+                updateData = filteredData; // Only allow tags for non-admin users
             }
 
             const ticket = await supportTicketService.updateTicket(id, updateData);

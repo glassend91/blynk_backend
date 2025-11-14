@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User = require('../../models/User');
+const OTP = require('../../models/OTP');
 const PackageSelection = require('../../models/PackageSelection');
 const { sendOTPEmail, sendWelcomeEmail } = require('../../utils/emailService');
 
@@ -79,9 +80,12 @@ router.post(
 
             console.log('body', req.body);
 
+            // Check if email is already registered (only block fully registered users)
             const existing = await User.findOne({ email });
             if (existing) {
-                return res.status(409).json({ message: 'Email already registered' });
+                return res.status(409).json({
+                    message: 'This email address is already in use. Please log in to your account or contact customer service for assistance.'
+                });
             }
 
             const passwordHash = await bcrypt.hash(password, 10);
@@ -151,13 +155,12 @@ router.post(
     }
 );
 
-// OTP endpoints - Separate from signup flow
+// OTP endpoints - Independent of user creation
 router.post(
     '/otp/send',
     [body('email').isEmail().withMessage('Valid email is required')],
     async (req, res, next) => {
         try {
-            console.log('req.body', req.body);
             const errors = validationResult(req);
             if (!errors.isEmpty()) {
                 return res.status(400).json({
@@ -168,33 +171,35 @@ router.post(
 
             const { email } = req.body;
 
-            const user = await User.findOne({ email });
-            console.log('user', user);
-            if (!user) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'User not found. Please sign up first.'
-                });
-            }
-
-            if (user.otpVerified) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Email already verified'
-                });
-            }
+            // Check if there's an existing unverified OTP for this email
+            const existingOTP = await OTP.getActiveOTP(email);
 
             // Generate new OTP
             const otp = generateOTP();
             const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-            user.otp = otp;
-            user.otpExpiry = otpExpiry;
-            await user.save();
+            if (existingOTP) {
+                // Update existing OTP
+                existingOTP.otp = otp;
+                existingOTP.otpExpiry = otpExpiry;
+                existingOTP.attempts = 0; // Reset attempts
+                existingOTP.verified = false;
+                await existingOTP.save();
+            } else {
+                // Create new OTP record
+                await OTP.create({
+                    email: email.toLowerCase(),
+                    otp,
+                    otpExpiry,
+                    verified: false,
+                    attempts: 0,
+                    purpose: 'email_verification'
+                });
+            }
 
-            // Send OTP email
+            // Send OTP email (no user required)
             try {
-                await sendOTPEmail(email, otp, user.firstName);
+                await sendOTPEmail(email, otp, 'User'); // Generic name since user doesn't exist yet
                 return res.json({
                     success: true,
                     message: 'OTP sent to your email successfully',
@@ -213,7 +218,7 @@ router.post(
     }
 );
 
-// Resend OTP - Same as send OTP
+// Resend OTP - Same as send OTP (uses OTP model)
 router.post(
     '/otp/resend',
     [body('email').isEmail().withMessage('Valid email is required')],
@@ -229,32 +234,35 @@ router.post(
 
             const { email } = req.body;
 
-            const user = await User.findOne({ email });
-            if (!user) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'User not found. Please sign up first.'
-                });
-            }
-
-            if (user.otpVerified) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Email already verified'
-                });
-            }
+            // Check if there's an existing unverified OTP for this email
+            const existingOTP = await OTP.getActiveOTP(email);
 
             // Generate new OTP
             const otp = generateOTP();
             const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-            user.otp = otp;
-            user.otpExpiry = otpExpiry;
-            await user.save();
+            if (existingOTP) {
+                // Update existing OTP
+                existingOTP.otp = otp;
+                existingOTP.otpExpiry = otpExpiry;
+                existingOTP.attempts = 0; // Reset attempts
+                existingOTP.verified = false;
+                await existingOTP.save();
+            } else {
+                // Create new OTP record
+                await OTP.create({
+                    email: email.toLowerCase(),
+                    otp,
+                    otpExpiry,
+                    verified: false,
+                    attempts: 0,
+                    purpose: 'email_verification'
+                });
+            }
 
-            // Send OTP email
+            // Send OTP email (no user required)
             try {
-                await sendOTPEmail(email, otp, user.firstName);
+                await sendOTPEmail(email, otp, 'User');
                 return res.json({
                     success: true,
                     message: 'OTP resent to your email successfully',
@@ -273,7 +281,7 @@ router.post(
     }
 );
 
-// Verify OTP - Separate from signup flow
+// Verify OTP - Uses OTP model (independent of user creation)
 router.post(
     '/otp/verify',
     [
@@ -292,63 +300,56 @@ router.post(
 
             const { email, code } = req.body;
 
-            const user = await User.findOne({ email });
-            if (!user) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'User not found. Please sign up first.'
-                });
-            }
+            // Find OTP record for this email
+            const otpRecord = await OTP.getActiveOTP(email);
 
-            if (user.otpVerified) {
+            if (!otpRecord) {
                 return res.status(400).json({
                     success: false,
-                    message: 'Email already verified'
-                });
-            }
-
-            if (!user.otp || !user.otpExpiry) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'No OTP found. Please request OTP first.'
+                    verified: false,
+                    message: 'No OTP found for this email. Please request OTP first.'
                 });
             }
 
             // Check if OTP is expired
-            if (new Date() > user.otpExpiry) {
+            if (new Date() > otpRecord.otpExpiry) {
                 return res.status(400).json({
                     success: false,
+                    verified: false,
                     message: 'OTP has expired. Please request a new OTP.'
                 });
             }
 
-            // Verify OTP
-            if (user.otp !== code) {
+            // Check attempt limit
+            if (otpRecord.attempts >= otpRecord.maxAttempts) {
                 return res.status(400).json({
                     success: false,
-                    message: 'Invalid OTP code'
+                    verified: false,
+                    message: 'Too many verification attempts. Please request a new OTP.'
                 });
             }
 
-            // Mark as verified and clear OTP
-            user.otpVerified = true;
-            user.otp = undefined;
-            user.otpExpiry = undefined;
-            await user.save();
+            // Verify OTP
+            if (otpRecord.otp !== code) {
+                otpRecord.attempts += 1;
+                await otpRecord.save();
+                return res.status(400).json({
+                    success: false,
+                    verified: false,
+                    message: 'Invalid OTP code. Please try again.',
+                    attemptsRemaining: otpRecord.maxAttempts - otpRecord.attempts
+                });
+            }
 
-            // Send welcome email
-            // try {
-            //     await sendWelcomeEmail(email, user.firstName);
-            // } catch (emailError) {
-            //     console.error('Failed to send welcome email:', emailError);
-            //     // Don't fail verification if welcome email fails
-            // }
+            // OTP verified successfully
+            otpRecord.verified = true;
+            otpRecord.verifiedAt = new Date();
+            await otpRecord.save();
 
             return res.json({
                 success: true,
                 verified: true,
-                message: 'Email verified successfully',
-                user: user.toSafeJSON()
+                message: 'Email verified successfully'
             });
         } catch (err) {
             next(err);

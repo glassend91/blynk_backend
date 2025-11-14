@@ -15,9 +15,7 @@ const userSchema = new mongoose.Schema(
         mblKeepExistingNumber: { type: Boolean, default: false },
         mblCurrentMobileNumber: { type: String, trim: true },
         mblCurrentProvider: { type: String, trim: true },
-        otpVerified: { type: Boolean, default: false },
-        otp: { type: String },
-        otpExpiry: { type: Date },
+        // OTP fields moved to separate OTP model
         // General user fields
         dateOfBirth: { type: String, trim: true },
         billingAddress: { type: String, trim: true },
@@ -99,7 +97,6 @@ userSchema.methods.toSafeJSON = function () {
         mblKeepExistingNumber: this.mblKeepExistingNumber,
         mblCurrentMobileNumber: this.mblCurrentMobileNumber,
         mblCurrentProvider: this.mblCurrentProvider,
-        otpVerified: this.otpVerified,
         dateOfBirth: this.dateOfBirth,
         identity: this.identity,
         simType: this.simType,
