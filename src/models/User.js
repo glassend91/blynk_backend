@@ -80,6 +80,12 @@ const userSchema = new mongoose.Schema(
         marketingCommunications: { type: Boolean, default: true },
         serviceUpdates: { type: Boolean, default: true },
         billingNotifications: { type: Boolean, default: true },
+
+        // Admin UI status (Active / Inactive / Pending)
+        status: { type: String, enum: ['Active', 'Inactive', 'Pending'], default: 'Active' },
+
+        // Soft delete flag for admin operations
+        isDeleted: { type: Boolean, default: false },
     },
     { timestamps: true }
 );
@@ -90,6 +96,7 @@ userSchema.methods.toSafeJSON = function () {
         firstName: this.firstName,
         lastName: this.lastName,
         email: this.email,
+        role: this.role,
         phone: this.phone,
         serviceAddress: this.serviceAddress,
         type: this.type,
@@ -107,6 +114,8 @@ userSchema.methods.toSafeJSON = function () {
         marketingCommunications: this.marketingCommunications,
         serviceUpdates: this.serviceUpdates,
         billingNotifications: this.billingNotifications,
+        status: this.status,
+        isDeleted: this.isDeleted,
         createdAt: this.createdAt,
         updatedAt: this.updatedAt,
     };

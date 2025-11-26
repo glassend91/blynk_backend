@@ -9,6 +9,9 @@ const { sendOTPEmail, sendWelcomeEmail } = require('../../utils/emailService');
 
 const router = express.Router();
 
+// Shared auth middleware for protected admin endpoints
+const { authenticateToken, requireAdmin } = require('../../middleware/auth');
+
 const JWT_EXPIRES_IN = '7d';
 const OTP_EXPIRY_MINUTES = 10;
 
@@ -607,6 +610,224 @@ router.post(
                 message: existingUser ? 'Email is already registered' : 'Email is available'
             });
 
+        } catch (err) {
+            next(err);
+        }
+    }
+);
+
+// List users for admin (for admin UI)
+router.get('/users', authenticateToken, requireAdmin, async (req, res, next) => {
+    try {
+        // Exclude soft-deleted users
+        const users = await User.find({ isDeleted: { $ne: true } }).sort({ createdAt: -1 });
+
+        // Exclude the currently logged-in admin from the list
+        const filtered = users.filter((u) => u._id.toString() !== String(req.user.id));
+
+        const mapped = filtered.map((u, index) => {
+            // Map backend role to admin UI role labels
+            let roleLabel = 'Support Manager';
+            if (u.role === 'admin') roleLabel = 'Administrator';
+            else if (u.role === 'support') roleLabel = 'Technical Support';
+
+            return {
+                id: index + 1,
+                userId: u._id.toString(),
+                name: [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email,
+                email: u.email,
+                type: u.type,
+                // role: roleLabel,
+                role: u.role,
+                status: u.status || 'Active',
+                lastLogin: 'Never',
+                created: u.createdAt ? u.createdAt.toISOString().slice(0, 10) : '',
+            };
+        });
+
+        return res.json({
+            success: true,
+            users: mapped,
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+// Admin: update another user (name/role – email cannot be changed here)
+router.put(
+    '/users/:id',
+    authenticateToken,
+    requireAdmin,
+    [
+        body('name').optional().isString().trim().notEmpty(),
+        body('role').optional().isString().trim().notEmpty(),
+        body('status').optional().isString().trim().notEmpty(),
+    ],
+    async (req, res, next) => {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    errors: errors.array(),
+                });
+            }
+
+            const { name, role, status } = req.body;
+            const userId = req.params.id;
+
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+            }
+
+            // Update name (split into first/last)
+            if (name) {
+                const parts = String(name).trim().split(' ');
+                user.firstName = parts[0] || user.firstName;
+                user.lastName = parts.slice(1).join(' ') || user.lastName;
+            }
+
+            // Update role - map from UI label or raw role value
+            if (role) {
+                let newRole = user.role;
+                if (role === 'Administrator') newRole = 'admin';
+                else if (role === 'Technical Support') newRole = 'support';
+                else if (role === 'Support Manager') newRole = 'support'; // treat as support-level
+                else if (role === 'Customer') newRole = 'customer';
+                else if (['admin', 'support', 'customer'].includes(role)) newRole = role;
+
+                user.role = newRole;
+            }
+
+            // Update status for admin UI
+            if (status && ['Active', 'Inactive', 'Pending'].includes(status)) {
+                user.status = status;
+            }
+
+            await user.save();
+
+            // Map back to the same shape as /auth/users
+            const mapped = {
+                id: 0, // will be replaced client-side
+                userId: user._id.toString(),
+                name: [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email,
+                email: user.email,
+                type: user.type,
+                role: user.role,
+                status: user.status || 'Active',
+                lastLogin: 'Never',
+                created: user.createdAt ? user.createdAt.toISOString().slice(0, 10) : '',
+            };
+
+            return res.json({
+                success: true,
+                user: mapped,
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+);
+
+// Admin: soft-delete user (mark as deleted + set status Inactive)
+router.delete(
+    '/users/:id',
+    authenticateToken,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const userId = req.params.id;
+
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+            }
+
+            user.isDeleted = true;
+            user.status = 'Inactive';
+            await user.save();
+
+            return res.json({
+                success: true,
+                message: 'User deleted successfully',
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+);
+
+// Seed an initial admin user (protected by a shared secret)
+router.post(
+    '/seed-admin',
+    [
+        body('secret').isString().notEmpty().withMessage('Secret is required'),
+        body('email').isEmail().withMessage('Valid email is required'),
+        body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long'),
+        body('firstName').isString().trim().notEmpty().withMessage('First name is required'),
+        body('lastName').isString().trim().notEmpty().withMessage('Last name is required'),
+    ],
+    async (req, res, next) => {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    errors: errors.array(),
+                });
+            }
+
+            const { secret, email, password, firstName, lastName, phone } = req.body;
+            // const expectedSecret = process.env.ADMIN_SEED_SECRET;
+            const expectedSecret = 'BLYNK';
+
+            if (!expectedSecret || secret !== expectedSecret) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Invalid seed secret',
+                });
+            }
+
+            let user = await User.findOne({ email });
+
+            const passwordHash = await bcrypt.hash(password, 10);
+
+            if (user) {
+                // Update existing user to admin
+                user.firstName = firstName;
+                user.lastName = lastName;
+                if (phone) user.phone = phone;
+                user.passwordHash = passwordHash;
+                user.role = 'admin';
+                await user.save();
+            } else {
+                // Create new admin user
+                user = await User.create({
+                    firstName,
+                    lastName,
+                    email,
+                    phone,
+                    passwordHash,
+                    role: 'admin',
+                });
+            }
+
+            const token = createToken(user.id);
+
+            return res.json({
+                success: true,
+                message: 'Admin user seeded successfully',
+                token,
+                user: user.toSafeJSON(),
+            });
         } catch (err) {
             next(err);
         }
