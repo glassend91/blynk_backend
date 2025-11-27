@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const ServiceController = require('../controllers/serviceController');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -19,6 +19,50 @@ const validateRequest = (req, res, next) => {
     }
     next();
 };
+
+// Admin-only services listing
+router.get('/admin/list', requireAdmin, ServiceController.getServicesForAdmin);
+
+// Admin: create service
+router.post(
+    '/admin',
+    requireAdmin,
+    [
+        body('serviceName').isString().trim().notEmpty().withMessage('Service name is required'),
+        body('serviceType')
+            .isIn(['NBN', 'Mobile', 'Data Only', 'Voice Only'])
+            .withMessage('Invalid service type'),
+        body('price')
+            .isFloat({ min: 0 })
+            .withMessage('Price must be a positive number'),
+        body('status')
+            .optional()
+            .isIn(['Published', 'Draft'])
+            .withMessage('Status must be Published or Draft'),
+        body('billingCycle')
+            .optional()
+            .isIn(['monthly', 'quarterly', 'yearly'])
+            .withMessage('Invalid billing cycle'),
+        body('currency')
+            .optional()
+            .isIn(['AUD', 'USD', 'EUR', 'GBP'])
+            .withMessage('Invalid currency'),
+        body('speedOrData')
+            .optional()
+            .isString()
+            .withMessage('Speed/Data must be a string'),
+        body('description')
+            .optional()
+            .isString()
+            .withMessage('Description must be a string'),
+        body('features')
+            .optional()
+            .isArray()
+            .withMessage('Features must be an array of strings'),
+    ],
+    validateRequest,
+    ServiceController.createService
+);
 
 // Get all available services with optional filtering
 router.get(

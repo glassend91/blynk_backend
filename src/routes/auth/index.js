@@ -1,11 +1,12 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const User = require('../../models/User');
 const OTP = require('../../models/OTP');
 const PackageSelection = require('../../models/PackageSelection');
-const { sendOTPEmail, sendWelcomeEmail } = require('../../utils/emailService');
+const { sendOTPEmail, sendWelcomeEmail, sendAdminInviteEmail } = require('../../utils/emailService');
 
 const router = express.Router();
 
@@ -14,6 +15,23 @@ const { authenticateToken, requireAdmin } = require('../../middleware/auth');
 
 const JWT_EXPIRES_IN = '7d';
 const OTP_EXPIRY_MINUTES = 10;
+const ADMIN_INVITE_URL = process.env.ADMIN_INVITE_URL || 'https://app.blynk.com/login';
+const ADMIN_ROLE_LABELS = ['Administrator', 'Support Manager', 'Content Editor', 'Technical Support'];
+const UI_ROLE_TO_DB_ROLE = {
+    Administrator: 'admin',
+    'Support Manager': 'support',
+    'Content Editor': 'support',
+    'Technical Support': 'support',
+};
+const DB_ROLE_TO_UI_ROLE = {
+    admin: 'admin',
+    support: 'Technical Support',
+    customer: 'Customer',
+    contentEditor: 'Content Editor',
+    technicalSupport: 'Technical Support',
+    supportManager: 'Support Manager',
+    administrator: 'Administrator',
+};
 
 function createToken(userId) {
     const secret = process.env.JWT_SECRET || 'dev_secret_change_me';
@@ -23,6 +41,31 @@ function createToken(userId) {
 // Generate 6-digit OTP
 function generateOTP() {
     return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function mapUiRoleToDb(roleLabel) {
+    return UI_ROLE_TO_DB_ROLE[roleLabel] || 'support';
+}
+
+function getDisplayRole(user) {
+    if (user.adminRoleLabel && ADMIN_ROLE_LABELS.includes(user.adminRoleLabel)) {
+        return user.adminRoleLabel;
+    }
+    return DB_ROLE_TO_UI_ROLE[user.role] || 'Support Manager';
+}
+
+function formatUserForAdminList(user, order = 0) {
+    return {
+        id: order,
+        userId: user._id.toString(),
+        name: [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email,
+        email: user.email,
+        type: user.type,
+        role: getDisplayRole(user),
+        status: user.status || 'Active',
+        lastLogin: 'Never',
+        created: user.createdAt ? user.createdAt.toISOString().slice(0, 10) : '',
+    };
 }
 
 router.post(
@@ -616,6 +659,76 @@ router.post(
     }
 );
 
+// Admin: create a user directly from the console
+router.post(
+    '/createUserByAdmin',
+    authenticateToken,
+    requireAdmin,
+    [
+        body('firstName').isString().trim().notEmpty().withMessage('First name is required'),
+        body('lastName').isString().trim().notEmpty().withMessage('Last name is required'),
+        body('email').isEmail().withMessage('Valid email is required'),
+        body('role')
+            .isString()
+            .trim()
+            .custom((value) => ADMIN_ROLE_LABELS.includes(value))
+            .withMessage('Invalid role selection'),
+    ],
+    async (req, res, next) => {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    errors: errors.array(),
+                });
+            }
+
+            const { firstName, lastName, email, role } = req.body;
+            const normalizedEmail = String(email).toLowerCase();
+
+            const existing = await User.findOne({ email: normalizedEmail });
+            if (existing) {
+                return res.status(409).json({
+                    success: false,
+                    message: 'Email is already registered',
+                });
+            }
+
+            const passwordPlaceholder = crypto.randomBytes(8).toString('hex');
+            const passwordHash = await bcrypt.hash(passwordPlaceholder, 10);
+
+            const user = await User.create({
+                firstName: firstName.trim(),
+                lastName: lastName.trim(),
+                email: normalizedEmail,
+                role: mapUiRoleToDb(role),
+                adminRoleLabel: role,
+                status: 'Pending',
+                passwordHash,
+            });
+
+            const inviteLink = `${ADMIN_INVITE_URL}?email=${encodeURIComponent(normalizedEmail)}`;
+            sendAdminInviteEmail({
+                email: normalizedEmail,
+                name: `${firstName.trim()} ${lastName.trim()}`.trim(),
+                role,
+                inviteLink,
+                password: passwordPlaceholder,
+            }).catch((inviteErr) => {
+                console.error('Failed to send admin invite email', inviteErr);
+            });
+
+            return res.status(201).json({
+                success: true,
+                user: formatUserForAdminList(user, 0),
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+);
+
 // List users for admin (for admin UI)
 router.get('/users', authenticateToken, requireAdmin, async (req, res, next) => {
     try {
@@ -625,25 +738,7 @@ router.get('/users', authenticateToken, requireAdmin, async (req, res, next) => 
         // Exclude the currently logged-in admin from the list
         const filtered = users.filter((u) => u._id.toString() !== String(req.user.id));
 
-        const mapped = filtered.map((u, index) => {
-            // Map backend role to admin UI role labels
-            let roleLabel = 'Support Manager';
-            if (u.role === 'admin') roleLabel = 'Administrator';
-            else if (u.role === 'support') roleLabel = 'Technical Support';
-
-            return {
-                id: index + 1,
-                userId: u._id.toString(),
-                name: [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email,
-                email: u.email,
-                type: u.type,
-                // role: roleLabel,
-                role: u.role,
-                status: u.status || 'Active',
-                lastLogin: 'Never',
-                created: u.createdAt ? u.createdAt.toISOString().slice(0, 10) : '',
-            };
-        });
+        const mapped = filtered.map((u, index) => formatUserForAdminList(u, index + 1));
 
         return res.json({
             success: true,
@@ -694,14 +789,13 @@ router.put(
 
             // Update role - map from UI label or raw role value
             if (role) {
-                let newRole = user.role;
-                if (role === 'Administrator') newRole = 'admin';
-                else if (role === 'Technical Support') newRole = 'support';
-                else if (role === 'Support Manager') newRole = 'support'; // treat as support-level
-                else if (role === 'Customer') newRole = 'customer';
-                else if (['admin', 'support', 'customer'].includes(role)) newRole = role;
-
-                user.role = newRole;
+                if (ADMIN_ROLE_LABELS.includes(role)) {
+                    user.role = mapUiRoleToDb(role);
+                    user.adminRoleLabel = role;
+                } else if (['admin', 'support', 'customer'].includes(role)) {
+                    user.role = role;
+                    user.adminRoleLabel = DB_ROLE_TO_UI_ROLE[role] || null;
+                }
             }
 
             // Update status for admin UI
@@ -712,17 +806,7 @@ router.put(
             await user.save();
 
             // Map back to the same shape as /auth/users
-            const mapped = {
-                id: 0, // will be replaced client-side
-                userId: user._id.toString(),
-                name: [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email,
-                email: user.email,
-                type: user.type,
-                role: user.role,
-                status: user.status || 'Active',
-                lastLogin: 'Never',
-                created: user.createdAt ? user.createdAt.toISOString().slice(0, 10) : '',
-            };
+            const mapped = formatUserForAdminList(user, 0);
 
             return res.json({
                 success: true,

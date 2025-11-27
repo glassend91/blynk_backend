@@ -5,6 +5,106 @@ const PaymentMethod = require('../models/PaymentMethod');
 const BillingAccount = require('../models/BillingAccount');
 const Invoice = require('../models/Invoice');
 
+const BILLING_LABELS = {
+    monthly: 'Month',
+    quarterly: 'Quarter',
+    yearly: 'Year',
+};
+
+const SUPPORTED_SERVICE_TYPES = ['NBN', 'Mobile', 'Data Only', 'Voice Only'];
+
+function formatPriceDisplay(service) {
+    const currency = service.currency || 'AUD';
+    const price = Number(service.price || 0);
+    const formatter = new Intl.NumberFormat('en-AU', {
+        style: 'currency',
+        currency,
+        minimumFractionDigits: 2,
+    });
+    const cycle = BILLING_LABELS[service.billingCycle] || service.billingCycle || 'Month';
+    return `${formatter.format(price)}/${cycle}`;
+}
+
+function determineSpeedOrData(service) {
+    const specs = service.specifications || {};
+    if (service.serviceType === 'NBN') {
+        if (specs.downloadSpeed && specs.uploadSpeed) {
+            return `${specs.downloadSpeed}/${specs.uploadSpeed} Mbps`;
+        }
+        if (specs.downloadSpeed) return `${specs.downloadSpeed} Mbps`;
+        return specs.dataAllowance || 'NBN Plan';
+    }
+    if (service.serviceType === 'Mobile') {
+        return specs.dataAllowance || specs.network || '4G/5G';
+    }
+    if (service.serviceType === 'Data Only') {
+        return specs.dataAllowance || 'Data Only';
+    }
+    if (service.serviceType === 'Voice Only') {
+        if (specs.voiceMinutes || specs.smsMessages) {
+            return `${specs.voiceMinutes || 'Unlimited'} mins / ${specs.smsMessages || 'Unlimited'} SMS`;
+        }
+        return 'Voice Plan';
+    }
+    return specs.dataAllowance || 'Plan';
+}
+
+function buildSpecifications(serviceType, speedOrData) {
+    const specs = {};
+    if (!speedOrData) return specs;
+
+    const value = String(speedOrData).trim();
+    if (!value) return specs;
+
+    if (serviceType === 'NBN') {
+        const sanitized = value.replace(/mbps/gi, '').trim();
+        const [downloadStr, uploadStr] = sanitized.split('/');
+        const downloadSpeed = downloadStr ? parseInt(downloadStr, 10) : NaN;
+        const uploadSpeed = uploadStr ? parseInt(uploadStr, 10) : NaN;
+        if (!Number.isNaN(downloadSpeed)) specs.downloadSpeed = downloadSpeed;
+        if (!Number.isNaN(uploadSpeed)) specs.uploadSpeed = uploadSpeed;
+        if (Number.isNaN(downloadSpeed) && Number.isNaN(uploadSpeed)) {
+            specs.dataAllowance = value;
+        }
+    } else if (serviceType === 'Mobile' || serviceType === 'Data Only') {
+        specs.dataAllowance = value;
+    } else if (serviceType === 'Voice Only') {
+        specs.voiceMinutes = value;
+    } else {
+        specs.dataAllowance = value;
+    }
+
+    return specs;
+}
+
+function mapFeaturesPayload(features) {
+    if (!Array.isArray(features)) return [];
+    return features
+        .map((feature) => (typeof feature === 'string' ? feature.trim() : ''))
+        .filter(Boolean)
+        .map((name) => ({
+            name,
+            description: '',
+            isIncluded: true,
+        }));
+}
+
+function mapServiceToAdminRow(service, index) {
+    return {
+        id: index + 1,
+        serviceId: service._id.toString(),
+        name: service.serviceName,
+        details: service.description || 'No description provided',
+        type: service.serviceType === 'Data Only' || service.serviceType === 'Voice Only'
+            ? service.serviceType
+            : (service.serviceType === 'Mobile' ? 'Mobile' : 'NBN'),
+        speedOrData: determineSpeedOrData(service),
+        price: formatPriceDisplay(service),
+        status: service.isActive ? 'Published' : 'Draft',
+        customers: service.totalSubscriptions || 0,
+    };
+}
+
 class ServiceController {
     // Get all available services
     static async getServices(req, res) {
@@ -65,6 +165,92 @@ class ServiceController {
             res.status(500).json({
                 error: 'Failed to fetch services',
                 message: error.message
+            });
+        }
+    }
+
+    // Admin listing for services (used by admin dashboard)
+    static async getServicesForAdmin(req, res) {
+        try {
+            const services = await Service.find({})
+                .sort({ createdAt: -1 });
+
+            const mapped = services.map(mapServiceToAdminRow);
+
+            res.json({
+                success: true,
+                services: mapped,
+            });
+        } catch (error) {
+            console.error('Error fetching admin services:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to fetch services',
+            });
+        }
+    }
+
+    static async createService(req, res) {
+        try {
+            const {
+                serviceName,
+                serviceType,
+                price,
+                billingCycle = 'monthly',
+                currency = 'AUD',
+                status = 'Published',
+                description,
+                speedOrData,
+                features = [],
+            } = req.body;
+
+            if (!SUPPORTED_SERVICE_TYPES.includes(serviceType)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Unsupported service type',
+                });
+            }
+
+            const providerId = req.user?.id;
+            if (!providerId) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Provider context missing',
+                });
+            }
+
+            const numericPrice = Number(price);
+            if (Number.isNaN(numericPrice)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid price value',
+                });
+            }
+
+            const service = await Service.create({
+                serviceName: serviceName.trim(),
+                serviceType,
+                description: description ? description.trim() : '',
+                price: numericPrice,
+                currency,
+                billingCycle,
+                providerId,
+                specifications: buildSpecifications(serviceType, speedOrData),
+                features: mapFeaturesPayload(features),
+                isActive: status !== 'Draft',
+                isAvailable: true,
+            });
+
+            const mapped = mapServiceToAdminRow(service, 0);
+            res.status(201).json({
+                success: true,
+                service: mapped,
+            });
+        } catch (error) {
+            console.error('Error creating service:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to create service',
             });
         }
     }
