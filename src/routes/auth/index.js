@@ -6,6 +6,7 @@ const { body, validationResult } = require('express-validator');
 const User = require('../../models/User');
 const OTP = require('../../models/OTP');
 const PackageSelection = require('../../models/PackageSelection');
+const Role = require('../../models/Role');
 const { sendOTPEmail, sendWelcomeEmail, sendAdminInviteEmail } = require('../../utils/emailService');
 
 const router = express.Router();
@@ -16,12 +17,14 @@ const { authenticateToken, requireAdmin } = require('../../middleware/auth');
 const JWT_EXPIRES_IN = '7d';
 const OTP_EXPIRY_MINUTES = 10;
 const ADMIN_INVITE_URL = process.env.ADMIN_INVITE_URL || 'https://app.blynk.com/login';
-const ADMIN_ROLE_LABELS = ['Administrator', 'Support Manager', 'Content Editor', 'Technical Support'];
+// Admin UI role labels (backed by Roles collection in admin app)
+const ADMIN_ROLE_LABELS = ['Admin', 'Content Manager', 'Support Agent', 'Technician Manager'];
+// Map UI role label -> internal DB role code
 const UI_ROLE_TO_DB_ROLE = {
-    Administrator: 'admin',
-    'Support Manager': 'support',
-    'Content Editor': 'support',
-    'Technical Support': 'support',
+    'Admin': 'admin',
+    'Content Manager': 'admin',
+    'Support Agent': 'admin',
+    'Technician Manager': 'admin',
 };
 const DB_ROLE_TO_UI_ROLE = {
     admin: 'admin',
@@ -48,6 +51,10 @@ function mapUiRoleToDb(roleLabel) {
 }
 
 function getDisplayRole(user) {
+    // Prefer subrole (new field) over adminRoleLabel (legacy)
+    if (user.subrole) {
+        return user.subrole;
+    }
     if (user.adminRoleLabel && ADMIN_ROLE_LABELS.includes(user.adminRoleLabel)) {
         return user.adminRoleLabel;
     }
@@ -414,7 +421,8 @@ router.post(
             }
 
             const { email, password } = req.body;
-            const user = await User.findOne({ email });
+            const normalizedEmail = String(email).toLowerCase();
+            const user = await User.findOne({ email: normalizedEmail });
             if (!user) {
                 return res.status(401).json({ message: 'Invalid email or password' });
             }
@@ -424,8 +432,32 @@ router.post(
                 return res.status(401).json({ message: 'Invalid email or password' });
             }
 
+            // Compute effective permissions based on role/subrole
+            let permissions = {};
+            try {
+                // For admin/superAdmin, use the Role document matching subrole name
+                if ((user.role === 'admin' || user.role === 'superAdmin') && user.subrole) {
+                    const roleDoc = await Role.findOne({ name: user.subrole });
+                    console.log('roleDoc', roleDoc);
+                    if (roleDoc && roleDoc.permissions) {
+                        permissions = roleDoc.permissions;
+                    }
+                }
+            } catch (permErr) {
+                console.error('Failed to load permissions for user on login:', permErr);
+            }
+
             const token = createToken(user.id);
-            return res.json({ token, user: user.toSafeJSON(), success: true });
+            const safeUser = user.toSafeJSON();
+
+            return res.json({
+                token,
+                user: {
+                    ...safeUser,
+                    permissions,
+                },
+                success: true,
+            });
         } catch (err) {
             next(err);
         }
@@ -452,6 +484,20 @@ router.get('/me', authRequired, async (req, res, next) => {
         const user = await User.findById(req.userId);
         if (!user) return res.status(404).json({ message: 'User not found' });
 
+        // Load permissions for admin/superAdmin users
+        let permissions = {};
+        try {
+            if ((user.role === 'admin' || user.role === 'superAdmin') && user.subrole) {
+                const Role = require('../../models/Role');
+                const roleDoc = await Role.findOne({ name: user.subrole });
+                if (roleDoc && roleDoc.permissions) {
+                    permissions = roleDoc.permissions;
+                }
+            }
+        } catch (permErr) {
+            console.error('Failed to load permissions for /me endpoint:', permErr);
+        }
+
         // Get user's selected packages
         const selectedPackages = await PackageSelection.find({
             customerId: req.userId,
@@ -463,6 +509,7 @@ router.get('/me', authRequired, async (req, res, next) => {
 
         const userData = user.toSafeJSON();
         userData.selectedPackages = selectedPackages;
+        userData.permissions = permissions;
 
         return res.json({
             user: userData,
@@ -668,11 +715,11 @@ router.post(
         body('firstName').isString().trim().notEmpty().withMessage('First name is required'),
         body('lastName').isString().trim().notEmpty().withMessage('Last name is required'),
         body('email').isEmail().withMessage('Valid email is required'),
-        body('role')
+        body('subrole')
             .isString()
             .trim()
-            .custom((value) => ADMIN_ROLE_LABELS.includes(value))
-            .withMessage('Invalid role selection'),
+            .notEmpty()
+            .withMessage('Subrole is required'),
     ],
     async (req, res, next) => {
         try {
@@ -684,7 +731,25 @@ router.post(
                 });
             }
 
-            const { firstName, lastName, email, role } = req.body;
+            // Check if user has permission to invite users
+            // SuperAdmin bypasses permission checks
+            if (req.user.role !== 'superAdmin') {
+                const currentUser = await User.findById(req.user.id);
+                if (currentUser && currentUser.subrole) {
+                    const roleDoc = await Role.findOne({ name: currentUser.subrole });
+                    if (roleDoc && roleDoc.permissions) {
+                        const hasInvitePermission = roleDoc.permissions['user.invite'] === true;
+                        if (!hasInvitePermission) {
+                            return res.status(403).json({
+                                success: false,
+                                message: 'You do not have permission to invite users'
+                            });
+                        }
+                    }
+                }
+            }
+
+            const { firstName, lastName, email, subrole } = req.body;
             const normalizedEmail = String(email).toLowerCase();
 
             const existing = await User.findOne({ email: normalizedEmail });
@@ -698,12 +763,14 @@ router.post(
             const passwordPlaceholder = crypto.randomBytes(8).toString('hex');
             const passwordHash = await bcrypt.hash(passwordPlaceholder, 10);
 
+            // Set role to 'admin' and subrole to the selected role from dropdown
             const user = await User.create({
                 firstName: firstName.trim(),
                 lastName: lastName.trim(),
                 email: normalizedEmail,
-                role: mapUiRoleToDb(role),
-                adminRoleLabel: role,
+                role: 'admin', // Always set to 'admin' for admin users
+                subrole: subrole.trim(), // Store the specific role name (e.g., "Admin", "Content Manager", etc.)
+                adminRoleLabel: subrole.trim(), // Keep for backward compatibility
                 status: 'Pending',
                 passwordHash,
             });
@@ -712,7 +779,7 @@ router.post(
             sendAdminInviteEmail({
                 email: normalizedEmail,
                 name: `${firstName.trim()} ${lastName.trim()}`.trim(),
-                role,
+                role: subrole.trim(),
                 inviteLink,
                 password: passwordPlaceholder,
             }).catch((inviteErr) => {
@@ -732,8 +799,11 @@ router.post(
 // List users for admin (for admin UI)
 router.get('/users', authenticateToken, requireAdmin, async (req, res, next) => {
     try {
-        // Exclude soft-deleted users
-        const users = await User.find({ isDeleted: { $ne: true } }).sort({ createdAt: -1 });
+        // Exclude soft-deleted users and superAdmin users
+        const users = await User.find({
+            isDeleted: { $ne: true },
+            role: { $ne: 'superAdmin' }
+        }).sort({ createdAt: -1 });
 
         // Exclude the currently logged-in admin from the list
         const filtered = users.filter((u) => u._id.toString() !== String(req.user.id));
@@ -769,6 +839,24 @@ router.put(
                 });
             }
 
+            // Check if user has permission to edit users
+            // SuperAdmin bypasses permission checks
+            if (req.user.role !== 'superAdmin') {
+                const currentUser = await User.findById(req.user.id);
+                if (currentUser && currentUser.subrole) {
+                    const roleDoc = await Role.findOne({ name: currentUser.subrole });
+                    if (roleDoc && roleDoc.permissions) {
+                        const hasEditPermission = roleDoc.permissions['user.edit'] === true;
+                        if (!hasEditPermission) {
+                            return res.status(403).json({
+                                success: false,
+                                message: 'You do not have permission to edit users'
+                            });
+                        }
+                    }
+                }
+            }
+
             const { name, role, status } = req.body;
             const userId = req.params.id;
 
@@ -790,10 +878,12 @@ router.put(
             // Update role - map from UI label or raw role value
             if (role) {
                 if (ADMIN_ROLE_LABELS.includes(role)) {
-                    user.role = mapUiRoleToDb(role);
-                    user.adminRoleLabel = role;
+                    user.role = 'admin'; // Always set to 'admin' for admin users
+                    user.subrole = role; // Store the specific role name
+                    user.adminRoleLabel = role; // Keep for backward compatibility
                 } else if (['admin', 'support', 'customer'].includes(role)) {
                     user.role = role;
+                    user.subrole = null; // Clear subrole for non-admin roles
                     user.adminRoleLabel = DB_ROLE_TO_UI_ROLE[role] || null;
                 }
             }
@@ -825,6 +915,24 @@ router.delete(
     requireAdmin,
     async (req, res, next) => {
         try {
+            // Check if user has permission to delete users
+            // SuperAdmin bypasses permission checks
+            if (req.user.role !== 'superAdmin') {
+                const currentUser = await User.findById(req.user.id);
+                if (currentUser && currentUser.subrole) {
+                    const roleDoc = await Role.findOne({ name: currentUser.subrole });
+                    if (roleDoc && roleDoc.permissions) {
+                        const hasDeletePermission = roleDoc.permissions['user.delete'] === true;
+                        if (!hasDeletePermission) {
+                            return res.status(403).json({
+                                success: false,
+                                message: 'You do not have permission to delete users'
+                            });
+                        }
+                    }
+                }
+            }
+
             const userId = req.params.id;
 
             const user = await User.findById(userId);

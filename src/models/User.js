@@ -8,7 +8,8 @@ const userSchema = new mongoose.Schema(
         phone: { type: String, trim: true },
         serviceAddress: { type: String, trim: true },
         passwordHash: { type: String, required: true },
-        role: { type: String, enum: ['customer', 'admin', 'support', 'contentEditor', 'technicalSupport', 'supportManager', 'administrator'], default: 'customer' },
+        role: { type: String, enum: ['customer', 'admin', 'support', 'contentEditor', 'technicalSupport', 'supportManager', 'administrator', 'superAdmin'], default: 'customer' },
+        subrole: { type: String, trim: true }, // For admin users: stores the specific role name from Roles collection (e.g., "Admin", "Content Manager", "Support Agent", "Technician Manager")
         adminRoleLabel: { type: String, trim: true },
         type: { type: String, enum: ['NBN', 'MBL', 'MBB', 'SME', '-'], default: '-' },
         // MBL specific fields (optional)
@@ -115,6 +116,7 @@ userSchema.methods.toSafeJSON = function () {
         marketingCommunications: this.marketingCommunications,
         serviceUpdates: this.serviceUpdates,
         billingNotifications: this.billingNotifications,
+        subrole: this.subrole,
         adminRoleLabel: this.adminRoleLabel,
         status: this.status,
         isDeleted: this.isDeleted,

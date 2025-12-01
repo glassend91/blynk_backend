@@ -12,6 +12,15 @@ const paymentMethodsRouter = require('./routes/paymentMethods');
 const servicesRouter = require('./routes/services');
 const billingRouter = require('./routes/billing');
 const mobileRouter = require('./routes/mobile');
+const websiteContentRouter = require('./routes/websiteContent');
+const testimonialsRouter = require('./routes/testimonials');
+const storesRouter = require('./routes/stores');
+const simOrdersRouter = require('./routes/simOrders');
+const customerVerificationRouter = require('./routes/customerVerification');
+const customerPlansRouter = require('./routes/customerPlans');
+const systemSettingsRouter = require('./routes/systemSettings');
+const dashboardRouter = require('./routes/dashboard');
+const rolesRouter = require('./routes/roles');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -31,6 +40,15 @@ app.use('/api/payment-methods', paymentMethodsRouter);
 app.use('/api/services', servicesRouter);
 app.use('/api/billing', billingRouter);
 app.use('/api/v1/mobile', mobileRouter);
+app.use('/api/website-content', websiteContentRouter);
+app.use('/api/testimonials', testimonialsRouter);
+app.use('/api/stores', storesRouter);
+app.use('/api/sim-orders', simOrdersRouter);
+app.use('/api/customer-verification', customerVerificationRouter);
+app.use('/api/customer-plans', customerPlansRouter);
+app.use('/api/system-settings', systemSettingsRouter);
+app.use('/api/dashboard', dashboardRouter);
+app.use('/api/roles', rolesRouter);
 
 // 404 and Error handling
 app.use(notFoundHandler);

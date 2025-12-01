@@ -1,6 +1,7 @@
 const Service = require('../models/Service');
 const ServiceSubscription = require('../models/ServiceSubscription');
 const User = require('../models/User');
+const Role = require('../models/Role');
 const PaymentMethod = require('../models/PaymentMethod');
 const BillingAccount = require('../models/BillingAccount');
 const Invoice = require('../models/Invoice');
@@ -192,6 +193,24 @@ class ServiceController {
 
     static async createService(req, res) {
         try {
+            // Check if user has permission to create plans
+            // SuperAdmin bypasses permission checks
+            if (req.user.role !== 'superAdmin') {
+                const currentUser = await User.findById(req.user.id);
+                if (currentUser && currentUser.subrole) {
+                    const roleDoc = await Role.findOne({ name: currentUser.subrole });
+                    if (roleDoc && roleDoc.permissions) {
+                        const hasCreatePermission = roleDoc.permissions['plans.create'] === true;
+                        if (!hasCreatePermission) {
+                            return res.status(403).json({
+                                success: false,
+                                message: 'You do not have permission to create plans'
+                            });
+                        }
+                    }
+                }
+            }
+
             const {
                 serviceName,
                 serviceType,

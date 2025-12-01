@@ -49,13 +49,13 @@ async function authenticateToken(req, res, next) {
 }
 
 /**
- * Middleware to require admin role
+ * Middleware to require admin role (includes superAdmin)
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  * @param {Function} next - Express next function
  */
 function requireAdmin(req, res, next) {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== 'admin' && req.user.role !== 'superAdmin') {
         return res.status(403).json({
             success: false,
             message: 'Admin access required'
