@@ -221,6 +221,59 @@ class CustomerVerificationController {
             });
         }
     }
+
+    // Global customer search - searches across all customer fields
+    async globalCustomerSearch(req, res) {
+        try {
+            const { query } = req.query;
+
+            if (!query || !query.trim()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Search query is required'
+                });
+            }
+
+            const customers = await customerVerificationService.globalCustomerSearch(query);
+
+            res.status(200).json({
+                success: true,
+                data: customers,
+                count: customers.length
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+    // Get customer financial data
+    async getCustomerFinancialData(req, res) {
+        try {
+            const { customerId } = req.params;
+
+            if (!customerId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Customer ID is required'
+                });
+            }
+
+            const financialData = await customerVerificationService.getCustomerFinancialData(customerId);
+
+            res.status(200).json({
+                success: true,
+                data: financialData
+            });
+        } catch (error) {
+            res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
 }
 
 module.exports = new CustomerVerificationController();

@@ -12,6 +12,7 @@ const userSchema = new mongoose.Schema(
         subrole: { type: String, trim: true }, // For admin users: stores the specific role name from Roles collection (e.g., "Admin", "Content Manager", "Support Agent", "Technician Manager")
         adminRoleLabel: { type: String, trim: true },
         type: { type: String, enum: ['NBN', 'MBL', 'MBB', 'SME', '-'], default: '-' },
+        customerType: { type: String, enum: ['residential', 'business'], default: 'residential' }, // Customer type: residential or business
         // MBL specific fields (optional)
         mblSelectedNumber: { type: String, trim: true },
         mblKeepExistingNumber: { type: Boolean, default: false },
@@ -120,6 +121,7 @@ userSchema.methods.toSafeJSON = function () {
         adminRoleLabel: this.adminRoleLabel,
         status: this.status,
         isDeleted: this.isDeleted,
+        customerType: this.customerType,
         createdAt: this.createdAt,
         updatedAt: this.updatedAt,
     };

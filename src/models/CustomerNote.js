@@ -9,13 +9,13 @@ const customerNoteSchema = new mongoose.Schema({
     },
     noteType: {
         type: String,
-        enum: ['General', 'Billing', 'Technical', 'Account', 'Verification', 'Other'],
+        enum: ['General', 'Billing', 'Support', 'Technical', 'Account', 'Verification', 'Other', 'Service'],
         default: 'General'
     },
     priority: {
         type: String,
-        enum: ['Low', 'Medium', 'High', 'Urgent'],
-        default: 'Medium'
+        enum: ['Low', 'Normal', 'High', 'Urgent'],
+        default: 'Normal'
     },
     content: {
         type: String,

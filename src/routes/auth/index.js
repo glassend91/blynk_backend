@@ -68,6 +68,8 @@ function formatUserForAdminList(user, order = 0) {
         name: [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email,
         email: user.email,
         type: user.type,
+        phone: user.phone,
+        customerType: user.customerType,
         role: getDisplayRole(user),
         status: user.status || 'Active',
         lastLogin: 'Never',
@@ -103,6 +105,7 @@ router.post(
         }).withMessage('Business details must be an object or null'),
         body('simType').optional().isIn(['eSim', 'physical']),
         body('selectedPlan').optional().isObject().withMessage('Selected plan must be an object'),
+        body('customerType').optional().isIn(['residential', 'business']).withMessage('Customer type must be residential or business'),
     ],
     async (req, res, next) => {
         try {
@@ -129,6 +132,7 @@ router.post(
                 businessDetails,
                 simType,
                 selectedPlan,
+                customerType,
             } = req.body;
 
             console.log('body', req.body);
@@ -142,6 +146,15 @@ router.post(
             }
 
             const passwordHash = await bcrypt.hash(password, 10);
+
+            // Determine customerType if not provided
+            // If businessDetails is provided, it's a business customer
+            // Otherwise, default to residential
+            let finalCustomerType = customerType;
+            if (!finalCustomerType) {
+                finalCustomerType = businessDetails ? 'business' : 'residential';
+            }
+
             const user = await User.create({
                 firstName,
                 lastName,
@@ -159,6 +172,7 @@ router.post(
                 businessDetails,
                 simType,
                 passwordHash,
+                customerType: finalCustomerType,
                 otpVerified: false,
             });
 
@@ -558,6 +572,7 @@ router.put(
         body('marketingCommunications').optional().isBoolean(),
         body('serviceUpdates').optional().isBoolean(),
         body('billingNotifications').optional().isBoolean(),
+        body('customerType').optional().isIn(['residential', 'business']).withMessage('Customer type must be residential or business'),
     ],
     async (req, res, next) => {
         try {
@@ -598,7 +613,8 @@ router.put(
                 'smsNotifications',
                 'marketingCommunications',
                 'serviceUpdates',
-                'billingNotifications'
+                'billingNotifications',
+                'customerType'
             ];
 
             // Update only provided fields
@@ -799,6 +815,7 @@ router.post(
 // List users for admin (for admin UI)
 router.get('/users', authenticateToken, requireAdmin, async (req, res, next) => {
     try {
+        console.log('listing users');
         // Exclude soft-deleted users and superAdmin users
         const users = await User.find({
             isDeleted: { $ne: true },
@@ -826,6 +843,15 @@ router.put(
     requireAdmin,
     [
         body('name').optional().isString().trim().notEmpty(),
+        body('firstName').optional().isString().trim().notEmpty(),
+        body('lastName').optional().isString().trim().notEmpty(),
+        body('phone').optional().isString().trim(),
+        body('serviceAddress').optional().isString().trim(),
+        body('type').optional().isIn(['NBN', 'MBL', 'MBB', 'SME']),
+        body('mblSelectedNumber').optional().isString().trim(),
+        body('mblKeepExistingNumber').optional().isBoolean(),
+        body('mblCurrentMobileNumber').optional().isString().trim(),
+        body('mblCurrentProvider').optional().isString().trim(),
         body('role').optional().isString().trim().notEmpty(),
         body('status').optional().isString().trim().notEmpty(),
     ],
@@ -857,7 +883,7 @@ router.put(
                 }
             }
 
-            const { name, role, status } = req.body;
+            const { name, role, status, firstName, lastName, phone, serviceAddress, type, mblSelectedNumber, mblKeepExistingNumber, mblCurrentMobileNumber, mblCurrentProvider, customerType } = req.body;
             const userId = req.params.id;
 
             const user = await User.findById(userId);
@@ -873,6 +899,30 @@ router.put(
                 const parts = String(name).trim().split(' ');
                 user.firstName = parts[0] || user.firstName;
                 user.lastName = parts.slice(1).join(' ') || user.lastName;
+            }
+
+            if (firstName) {
+                user.firstName = firstName;
+            }
+
+            if (lastName) {
+                user.lastName = lastName;
+            }
+
+            if (phone) {
+                user.phone = phone;
+            }
+
+            if (serviceAddress) {
+                user.serviceAddress = serviceAddress;
+            }
+
+            if (type) {
+                user.type = type;
+            }
+
+            if (mblSelectedNumber) {
+                user.mblSelectedNumber = mblSelectedNumber;
             }
 
             // Update role - map from UI label or raw role value
@@ -1025,5 +1075,18 @@ router.post(
         }
     }
 );
+
+router.get('/users/:id', authenticateToken, requireAdmin, async (req, res, next) => {
+    try {
+        const userId = req.params.id;
+        const user = await User.findById(userId);
+        return res.json({
+            success: true,
+            user: user.toSafeJSON(),
+        });
+    } catch (err) {
+        next(err);
+    }
+});
 
 module.exports = router;

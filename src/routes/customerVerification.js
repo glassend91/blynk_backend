@@ -70,5 +70,21 @@ router.get('/notes/:customerId', customerVerificationController.getCustomerNotes
  */
 router.get('/search', customerVerificationController.searchCustomersAndNotes);
 
+/**
+ * @route   GET /api/customer-verification/global-search
+ * @desc    Global customer search across all fields (name, email, phone, ID, address, business info, ABN)
+ * @access  Private (Admin)
+ * @query   query - search term
+ */
+router.get('/global-search', customerVerificationController.globalCustomerSearch);
+
+/**
+ * @route   GET /api/customer-verification/financial/:customerId
+ * @desc    Get customer financial overview (balance, next bill date, auto-pay status, payment method)
+ * @access  Private (Admin)
+ * @params  customerId - Customer ID
+ */
+router.get('/financial/:customerId', customerVerificationController.getCustomerFinancialData);
+
 module.exports = router;
 
