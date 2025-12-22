@@ -12,7 +12,7 @@ const BILLING_LABELS = {
     yearly: 'Year',
 };
 
-const SUPPORTED_SERVICE_TYPES = ['NBN', 'Mobile', 'Data Only', 'Voice Only'];
+const SUPPORTED_SERVICE_TYPES = ['NBN', 'Business NBN', 'Mobile', 'Data Only', 'Voice Only'];
 
 function formatPriceDisplay(service) {
     const currency = service.currency || 'AUD';
@@ -28,7 +28,7 @@ function formatPriceDisplay(service) {
 
 function determineSpeedOrData(service) {
     const specs = service.specifications || {};
-    if (service.serviceType === 'NBN') {
+    if (service.serviceType === 'NBN' || service.serviceType === 'Business NBN') {
         if (specs.downloadSpeed && specs.uploadSpeed) {
             return `${specs.downloadSpeed}/${specs.uploadSpeed} Mbps`;
         }
@@ -50,29 +50,37 @@ function determineSpeedOrData(service) {
     return specs.dataAllowance || 'Plan';
 }
 
-function buildSpecifications(serviceType, speedOrData) {
+function buildSpecifications(serviceType, speedOrData, staticIP, slaDetails) {
     const specs = {};
-    if (!speedOrData) return specs;
+    if (!speedOrData && staticIP === undefined && !slaDetails) return specs;
 
-    const value = String(speedOrData).trim();
-    if (!value) return specs;
-
-    if (serviceType === 'NBN') {
-        const sanitized = value.replace(/mbps/gi, '').trim();
-        const [downloadStr, uploadStr] = sanitized.split('/');
-        const downloadSpeed = downloadStr ? parseInt(downloadStr, 10) : NaN;
-        const uploadSpeed = uploadStr ? parseInt(uploadStr, 10) : NaN;
-        if (!Number.isNaN(downloadSpeed)) specs.downloadSpeed = downloadSpeed;
-        if (!Number.isNaN(uploadSpeed)) specs.uploadSpeed = uploadSpeed;
-        if (Number.isNaN(downloadSpeed) && Number.isNaN(uploadSpeed)) {
-            specs.dataAllowance = value;
+    if (speedOrData) {
+        const value = String(speedOrData).trim();
+        if (value) {
+            if (serviceType === 'NBN' || serviceType === 'Business NBN') {
+                const sanitized = value.replace(/mbps/gi, '').trim();
+                const [downloadStr, uploadStr] = sanitized.split('/');
+                const downloadSpeed = downloadStr ? parseInt(downloadStr, 10) : NaN;
+                const uploadSpeed = uploadStr ? parseInt(uploadStr, 10) : NaN;
+                if (!Number.isNaN(downloadSpeed)) specs.downloadSpeed = downloadSpeed;
+                if (!Number.isNaN(uploadSpeed)) specs.uploadSpeed = uploadSpeed;
+                if (Number.isNaN(downloadSpeed) && Number.isNaN(uploadSpeed)) {
+                    specs.dataAllowance = value;
+                }
+            } else if (serviceType === 'Mobile' || serviceType === 'Data Only') {
+                specs.dataAllowance = value;
+            } else if (serviceType === 'Voice Only') {
+                specs.voiceMinutes = value;
+            } else {
+                specs.dataAllowance = value;
+            }
         }
-    } else if (serviceType === 'Mobile' || serviceType === 'Data Only') {
-        specs.dataAllowance = value;
-    } else if (serviceType === 'Voice Only') {
-        specs.voiceMinutes = value;
-    } else {
-        specs.dataAllowance = value;
+    }
+
+    // Add business-specific fields for Business NBN
+    if (serviceType === 'Business NBN') {
+        if (staticIP !== undefined) specs.staticIP = staticIP;
+        if (slaDetails) specs.slaDetails = slaDetails;
     }
 
     return specs;
@@ -96,7 +104,7 @@ function mapServiceToAdminRow(service, index) {
         serviceId: service._id.toString(),
         name: service.serviceName,
         details: service.description || 'No description provided',
-        type: service.serviceType === 'Data Only' || service.serviceType === 'Voice Only'
+        type: service.serviceType === 'Data Only' || service.serviceType === 'Voice Only' || service.serviceType === 'Business NBN'
             ? service.serviceType
             : (service.serviceType === 'Mobile' ? 'Mobile' : 'NBN'),
         speedOrData: determineSpeedOrData(service),
@@ -114,7 +122,7 @@ class ServiceController {
             const userId = req.user.id;
 
             // Build query
-            const query = { isActive: true, isAvailable: true };
+            const query = { isActive: true, isAvailable: true, isDeleted: { $ne: true } };
 
             if (serviceType) {
                 query.serviceType = serviceType;
@@ -170,10 +178,44 @@ class ServiceController {
         }
     }
 
+    // Admin: Get service by ID for editing
+    static async getServiceForAdmin(req, res) {
+        try {
+            const { serviceId } = req.params;
+
+            const service = await Service.findById(serviceId)
+                .populate('providerId', 'firstName lastName email');
+
+            if (!service || service.isDeleted) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Service not found'
+                });
+            }
+
+            // Format features for frontend
+            const featuresList = service.features?.map(f => f.name).join('\n') || '';
+
+            res.json({
+                success: true,
+                service: {
+                    ...service.toObject(),
+                    features: featuresList,
+                }
+            });
+        } catch (error) {
+            console.error('Error fetching service for admin:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to fetch service',
+            });
+        }
+    }
+
     // Admin listing for services (used by admin dashboard)
     static async getServicesForAdmin(req, res) {
         try {
-            const services = await Service.find({})
+            const services = await Service.find({ isDeleted: { $ne: true } })
                 .sort({ createdAt: -1 });
 
             const mapped = services.map(mapServiceToAdminRow);
@@ -221,6 +263,8 @@ class ServiceController {
                 description,
                 speedOrData,
                 features = [],
+                staticIP,
+                slaDetails,
             } = req.body;
 
             if (!SUPPORTED_SERVICE_TYPES.includes(serviceType)) {
@@ -254,7 +298,7 @@ class ServiceController {
                 currency,
                 billingCycle,
                 providerId,
-                specifications: buildSpecifications(serviceType, speedOrData),
+                specifications: buildSpecifications(serviceType, speedOrData, staticIP, slaDetails),
                 features: mapFeaturesPayload(features),
                 isActive: status !== 'Draft',
                 isAvailable: true,
@@ -280,7 +324,7 @@ class ServiceController {
             const { serviceId } = req.params;
             const userId = req.user.id;
 
-            const service = await Service.findById(serviceId)
+            const service = await Service.findOne({ _id: serviceId, isDeleted: { $ne: true } })
                 .populate('providerId', 'firstName lastName email');
 
             if (!service) {
@@ -322,7 +366,7 @@ class ServiceController {
             const userId = req.user.id;
 
             // Check if service exists and is available
-            const service = await Service.findById(serviceId);
+            const service = await Service.findOne({ _id: serviceId, isDeleted: { $ne: true } });
             if (!service || !service.isAvailableForSubscription()) {
                 return res.status(400).json({
                     error: 'Service not available for subscription'
@@ -833,6 +877,208 @@ class ServiceController {
             res.status(500).json({
                 error: 'Failed to update usage',
                 message: error.message
+            });
+        }
+    }
+
+    // Admin: Update service plan
+    static async updateService(req, res) {
+        try {
+            // Check permission
+            if (req.user.role !== 'superAdmin') {
+                const currentUser = await User.findById(req.user.id);
+                if (currentUser && currentUser.subrole) {
+                    const roleDoc = await Role.findOne({ name: currentUser.subrole });
+                    if (roleDoc && roleDoc.permissions) {
+                        const hasPermission = roleDoc.permissions['plans.create'] === true;
+                        if (!hasPermission) {
+                            return res.status(403).json({
+                                success: false,
+                                message: 'You do not have permission to update plans'
+                            });
+                        }
+                    }
+                }
+            }
+
+            const { serviceId } = req.params;
+            const {
+                serviceName,
+                serviceType,
+                price,
+                billingCycle = 'monthly',
+                currency = 'AUD',
+                status = 'Published',
+                description,
+                speedOrData,
+                features = [],
+                staticIP,
+                slaDetails,
+            } = req.body;
+
+            const service = await Service.findById(serviceId);
+            if (!service || service.isDeleted) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Service not found'
+                });
+            }
+
+            if (!SUPPORTED_SERVICE_TYPES.includes(serviceType)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Unsupported service type',
+                });
+            }
+
+            const numericPrice = Number(price);
+            if (Number.isNaN(numericPrice) || numericPrice < 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid price value',
+                });
+            }
+
+            // Update service fields
+            service.serviceName = serviceName.trim();
+            service.serviceType = serviceType;
+            service.description = description ? description.trim() : '';
+            service.price = numericPrice;
+            service.currency = currency;
+            service.billingCycle = billingCycle;
+            service.specifications = buildSpecifications(serviceType, speedOrData, staticIP, slaDetails);
+            service.features = mapFeaturesPayload(features);
+            service.isActive = status !== 'Draft';
+
+            await service.save();
+
+            const mapped = mapServiceToAdminRow(service, 0);
+            res.json({
+                success: true,
+                service: mapped,
+            });
+        } catch (error) {
+            console.error('Error updating service:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to update service',
+            });
+        }
+    }
+
+    // Admin: Toggle service active status (hide/show)
+    static async toggleServiceActive(req, res) {
+        try {
+            // Check permission
+            if (req.user.role !== 'superAdmin') {
+                const currentUser = await User.findById(req.user.id);
+                if (currentUser && currentUser.subrole) {
+                    const roleDoc = await Role.findOne({ name: currentUser.subrole });
+                    if (roleDoc && roleDoc.permissions) {
+                        const hasPermission = roleDoc.permissions['plans.create'] === true;
+                        if (!hasPermission) {
+                            return res.status(403).json({
+                                success: false,
+                                message: 'You do not have permission to update plans'
+                            });
+                        }
+                    }
+                }
+            }
+
+            const { serviceId } = req.params;
+            const { isActive } = req.body;
+
+            if (typeof isActive !== 'boolean') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'isActive must be a boolean'
+                });
+            }
+
+            const service = await Service.findById(serviceId);
+            if (!service || service.isDeleted) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Service not found'
+                });
+            }
+
+            service.isActive = isActive;
+            await service.save();
+
+            const mapped = mapServiceToAdminRow(service, 0);
+            res.json({
+                success: true,
+                service: mapped,
+            });
+        } catch (error) {
+            console.error('Error toggling service active status:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to update service status',
+            });
+        }
+    }
+
+    // Admin: Delete service (soft delete)
+    static async deleteService(req, res) {
+        try {
+            // Check permission
+            if (req.user.role !== 'superAdmin') {
+                const currentUser = await User.findById(req.user.id);
+                if (currentUser && currentUser.subrole) {
+                    const roleDoc = await Role.findOne({ name: currentUser.subrole });
+                    if (roleDoc && roleDoc.permissions) {
+                        const hasPermission = roleDoc.permissions['plans.delete'] === true;
+                        if (!hasPermission) {
+                            return res.status(403).json({
+                                success: false,
+                                message: 'You do not have permission to delete plans'
+                            });
+                        }
+                    }
+                }
+            }
+
+            const { serviceId } = req.params;
+
+            const service = await Service.findById(serviceId);
+            if (!service || service.isDeleted) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Service not found'
+                });
+            }
+
+            // Check for active subscriptions
+            const activeSubscriptions = await ServiceSubscription.countDocuments({
+                serviceId,
+                subscriptionStatus: { $in: ['active', 'pending'] }
+            });
+
+            if (activeSubscriptions > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Cannot delete service with ${activeSubscriptions} active subscription(s). Please cancel all subscriptions first.`
+                });
+            }
+
+            // Soft delete
+            service.isDeleted = true;
+            service.isActive = false;
+            service.isAvailable = false;
+            await service.save();
+
+            res.json({
+                success: true,
+                message: 'Service deleted successfully'
+            });
+        } catch (error) {
+            console.error('Error deleting service:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to delete service',
             });
         }
     }

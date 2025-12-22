@@ -48,7 +48,7 @@ class WebsiteContentController {
     async upsertPageContent(req, res) {
         try {
             const { pageKey } = req.params;
-            const { hero, features, seo } = req.body;
+            const { hero, features, seo, bodyContent, pageTitle } = req.body;
 
             // Check permission for SEO updates if seo is provided
             if (seo) {
@@ -70,22 +70,24 @@ class WebsiteContentController {
                 }
             }
 
-            if (!hero || !features || !seo) {
+            if (!seo) {
                 return res.status(400).json({
                     success: false,
-                    message: 'Missing required fields: hero, features, and seo are required'
+                    message: 'Missing required field: seo is required'
                 });
             }
 
             const content = await websiteContentService.upsertPageContent(pageKey, {
                 hero,
                 features,
-                seo
+                seo,
+                bodyContent,
+                pageTitle
             });
 
             res.status(200).json({
                 success: true,
-                message: `Page content for '${pageKey}' saved successfully`,
+                message: `Page content for '${pageKey}' saved and published successfully`,
                 data: content
             });
         } catch (error) {

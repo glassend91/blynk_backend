@@ -60,7 +60,7 @@ class SupportTicketController {
             if (assignedTo) filters.assignedTo = assignedTo;
 
             // If user is not admin, only show their tickets
-            if (req.user.role !== 'admin') {
+            if (req.user.role !== 'superAdmin' && req.user.role !== 'admin') {
                 filters.customerId = req.user.id;
             }
 

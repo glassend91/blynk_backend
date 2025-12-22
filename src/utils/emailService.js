@@ -1,5 +1,5 @@
 const transporter = require('../config/email');
-const { getOTPEmailTemplate, getOrderConfirmationTemplate } = require('./emailTemplates');
+const { getOTPEmailTemplate, getOrderConfirmationTemplate, getCustomerVerificationOTPTemplate } = require('./emailTemplates');
 
 /**
  * Send OTP email to user
@@ -174,10 +174,36 @@ async function sendOrderConfirmationEmail(email, name, planName, amount, orderId
     }
 }
 
+/**
+ * Send customer verification OTP email
+ * @param {string} email - Recipient email address
+ * @param {string} otp - OTP code
+ * @param {string} name - Customer's name
+ * @returns {Promise} - Email sending result
+ */
+async function sendCustomerVerificationOTPEmail(email, otp, name = 'Customer') {
+    try {
+        const mailOptions = {
+            from: `"${process.env.EMAIL_FROM_NAME || 'Blynk Customer Support'}" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: 'Identity Verification Code - Blynk',
+            html: getCustomerVerificationOTPTemplate(otp, name),
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log('Customer verification OTP email sent successfully:', info.messageId);
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        console.error('Error sending customer verification OTP email:', error);
+        throw new Error('Failed to send verification OTP email');
+    }
+}
+
 module.exports = {
     sendOTPEmail,
     sendWelcomeEmail,
     sendOrderConfirmationEmail,
     sendAdminInviteEmail,
+    sendCustomerVerificationOTPEmail,
 };
 

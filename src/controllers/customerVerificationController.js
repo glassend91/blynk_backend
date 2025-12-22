@@ -113,7 +113,7 @@ class CustomerVerificationController {
     // Create customer note
     async createCustomerNote(req, res) {
         try {
-            const { customerId, noteType, priority, content, tags } = req.body;
+            const { customerId, noteType, priority, content, tags, isCritical } = req.body;
             const createdBy = req.user.id;
 
             if (!customerId || !content) {
@@ -129,6 +129,7 @@ class CustomerVerificationController {
                 priority,
                 content,
                 tags,
+                isCritical,
                 createdBy
             });
 

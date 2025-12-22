@@ -23,6 +23,9 @@ const validateRequest = (req, res, next) => {
 // Admin-only services listing
 router.get('/admin/list', requireAdmin, ServiceController.getServicesForAdmin);
 
+// Admin: Get service by ID for editing
+router.get('/admin/:serviceId', requireAdmin, ServiceController.getServiceForAdmin);
+
 // Admin: create service
 router.post(
     '/admin',
@@ -30,7 +33,7 @@ router.post(
     [
         body('serviceName').isString().trim().notEmpty().withMessage('Service name is required'),
         body('serviceType')
-            .isIn(['NBN', 'Mobile', 'Data Only', 'Voice Only'])
+            .isIn(['NBN', 'Business NBN', 'Mobile', 'Data Only', 'Voice Only'])
             .withMessage('Invalid service type'),
         body('price')
             .isFloat({ min: 0 })
@@ -62,6 +65,67 @@ router.post(
     ],
     validateRequest,
     ServiceController.createService
+);
+
+// Admin: update service
+router.put(
+    '/admin/:serviceId',
+    requireAdmin,
+    [
+        body('serviceName').isString().trim().notEmpty().withMessage('Service name is required'),
+        body('serviceType')
+            .isIn(['NBN', 'Business NBN', 'Mobile', 'Data Only', 'Voice Only'])
+            .withMessage('Invalid service type'),
+        body('price')
+            .isFloat({ min: 0 })
+            .withMessage('Price must be a positive number'),
+        body('status')
+            .optional()
+            .isIn(['Published', 'Draft'])
+            .withMessage('Status must be Published or Draft'),
+        body('billingCycle')
+            .optional()
+            .isIn(['monthly', 'quarterly', 'yearly'])
+            .withMessage('Invalid billing cycle'),
+        body('currency')
+            .optional()
+            .isIn(['AUD', 'USD', 'EUR', 'GBP'])
+            .withMessage('Invalid currency'),
+        body('speedOrData')
+            .optional()
+            .isString()
+            .withMessage('Speed/Data must be a string'),
+        body('description')
+            .optional()
+            .isString()
+            .withMessage('Description must be a string'),
+        body('features')
+            .optional()
+            .isArray()
+            .withMessage('Features must be an array of strings'),
+    ],
+    validateRequest,
+    ServiceController.updateService
+);
+
+// Admin: toggle service active status (hide/show)
+router.patch(
+    '/admin/:serviceId/active',
+    requireAdmin,
+    [
+        body('isActive')
+            .isBoolean()
+            .withMessage('isActive must be a boolean'),
+    ],
+    validateRequest,
+    ServiceController.toggleServiceActive
+);
+
+// Admin: delete service (soft delete)
+router.delete(
+    '/admin/:serviceId',
+    requireAdmin,
+    ServiceController.deleteService
 );
 
 // Get all available services with optional filtering

@@ -68,7 +68,7 @@ otpSchema.methods.isValid = function () {
 // Static method to get active OTP for email
 otpSchema.statics.getActiveOTP = async function (email) {
     return await this.findOne({
-        email: email.toLowerCase(),
+        email: email?.toLowerCase() || '',
         verified: false
     }).sort({ createdAt: -1 }); // Get most recent
 };
@@ -76,7 +76,7 @@ otpSchema.statics.getActiveOTP = async function (email) {
 // Static method to mark OTP as verified
 otpSchema.statics.markAsVerified = async function (email, otp) {
     const otpRecord = await this.findOne({
-        email: email.toLowerCase(),
+        email: email?.toLowerCase() || '',
         otp,
         verified: false
     });

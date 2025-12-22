@@ -80,6 +80,104 @@ function getOTPEmailTemplate(otp, name = 'User') {
 }
 
 /**
+ * Get customer verification OTP email template
+ * @param {string} otp - OTP code
+ * @param {string} name - Customer's name
+ * @returns {string} - HTML email template
+ */
+function getCustomerVerificationOTPTemplate(otp, name = 'Customer') {
+    return `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Identity Verification Code - Blynk</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #F8F8F8;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #F8F8F8; padding: 40px 20px;">
+                <tr>
+                    <td align="center">
+                        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); max-width: 600px;">
+                            <!-- Header -->
+                            <tr>
+                                <td style="background: linear-gradient(135deg, #401B60 0%, #5C3B86 100%); padding: 48px 40px; text-align: center;">
+                                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Identity Verification</h1>
+                                    <p style="color: rgba(255,255,255,0.9); margin: 12px 0 0 0; font-size: 15px; font-weight: 400;">Blynk Customer Support</p>
+                                </td>
+                            </tr>
+                            
+                            <!-- Content -->
+                            <tr>
+                                <td style="padding: 48px 40px;">
+                                    <p style="color: #0A0A0A; font-size: 16px; line-height: 1.6; margin: 0 0 24px 0; font-weight: 500;">
+                                        Hello ${name},
+                                    </p>
+                                    
+                                    <p style="color: #6F6C90; font-size: 15px; line-height: 1.7; margin: 0 0 32px 0;">
+                                        We're verifying your identity to ensure the security of your account. Please use the verification code below to complete the process.
+                                    </p>
+                                    
+                                    <!-- OTP Box -->
+                                    <table width="100%" cellpadding="0" cellspacing="0">
+                                        <tr>
+                                            <td align="center" style="padding: 0 0 32px 0;">
+                                                <div style="background: linear-gradient(135deg, #401B60 0%, #5C3B86 100%); border-radius: 12px; padding: 32px 24px; display: inline-block; box-shadow: 0 8px 24px rgba(64, 27, 96, 0.25);">
+                                                    <div style="background-color: rgba(255,255,255,0.15); border-radius: 8px; padding: 20px 32px; backdrop-filter: blur(10px);">
+                                                        <h2 style="color: #ffffff; margin: 0; font-size: 42px; letter-spacing: 12px; font-weight: 700; font-family: 'Courier New', monospace; text-align: center;">
+                                                            ${otp}
+                                                        </h2>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                    
+                                    <!-- Info Box -->
+                                    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #F8F8F8; border-radius: 10px; padding: 20px; margin: 0 0 32px 0;">
+                                        <tr>
+                                            <td>
+                                                <p style="color: #6F6C90; font-size: 13px; line-height: 1.6; margin: 0; text-align: center;">
+                                                    <strong style="color: #0A0A0A;">⏱️ Expires in 10 minutes</strong><br/>
+                                                    <span style="color: #6F6C90;">This code is valid for one-time use only</span>
+                                                </p>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                    
+                                    <!-- Security Notice -->
+                                    <div style="border-left: 3px solid #401B60; padding-left: 16px; margin: 32px 0 0 0;">
+                                        <p style="color: #6F6C90; font-size: 13px; line-height: 1.6; margin: 0 0 8px 0;">
+                                            <strong style="color: #0A0A0A;">Security reminder:</strong>
+                                        </p>
+                                        <p style="color: #6F6C90; font-size: 13px; line-height: 1.6; margin: 0;">
+                                            If you didn't request this verification code, please ignore this email or contact our support team immediately. Never share this code with anyone.
+                                        </p>
+                                    </div>
+                                </td>
+                            </tr>
+                            
+                            <!-- Footer -->
+                            <tr>
+                                <td style="background-color: #F8F8F8; padding: 32px 40px; text-align: center; border-top: 1px solid #DFDBE3;">
+                                    <p style="color: #6F6C90; font-size: 12px; line-height: 1.6; margin: 0 0 8px 0;">
+                                        This is an automated message from Blynk Customer Support.
+                                    </p>
+                                    <p style="color: #6F6C90; font-size: 12px; line-height: 1.6; margin: 0;">
+                                        © ${new Date().getFullYear()} Blynk. All rights reserved.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+        </body>
+        </html>
+    `;
+}
+
+/**
  * Get password reset email template
  * @param {string} resetLink - Password reset link
  * @param {string} name - User's name
@@ -255,5 +353,6 @@ module.exports = {
     getOTPEmailTemplate,
     getPasswordResetTemplate,
     getOrderConfirmationTemplate,
+    getCustomerVerificationOTPTemplate,
 };
 

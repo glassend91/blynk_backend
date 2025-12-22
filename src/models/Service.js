@@ -10,7 +10,7 @@ const serviceSchema = new mongoose.Schema({
     serviceType: {
         type: String,
         required: true,
-        enum: ['NBN', 'Mobile', 'Data Only', 'Voice Only'],
+        enum: ['NBN', 'Business NBN', 'Mobile', 'Data Only', 'Voice Only'],
         default: 'Mobile'
     },
 
@@ -32,6 +32,10 @@ const serviceSchema = new mongoose.Schema({
         staticIP: {
             type: Boolean,
             default: false
+        },
+        slaDetails: {
+            type: String,
+            trim: true
         },
 
         // For Mobile services
@@ -84,6 +88,10 @@ const serviceSchema = new mongoose.Schema({
     isAvailable: {
         type: Boolean,
         default: true
+    },
+    isDeleted: {
+        type: Boolean,
+        default: false
     },
 
     // Service provider information

@@ -27,32 +27,49 @@ class WebsiteContentService {
     // Create or update page content
     async upsertPageContent(pageKey, data) {
         try {
-            const { hero, features, seo } = data;
+            const { hero, features, seo, bodyContent, pageTitle } = data;
 
-            // Validate required fields
-            if (!hero || !features || !seo) {
-                throw new Error('Missing required fields: hero, features, and seo are required');
+            // Validate required fields - seo is always required
+            if (!seo) {
+                throw new Error('Missing required field: seo is required');
+            }
+
+            const updateData = {
+                pageKey,
+                seo: {
+                    metaTitle: seo.metaTitle || '',
+                    metaDescription: seo.metaDescription || '',
+                    keywords: seo.keywords || ''
+                },
+                deletedAt: null // Ensure it's not deleted when upserting
+            };
+
+            // Add optional fields if provided
+            if (hero) {
+                updateData.hero = {
+                    headline: hero.headline || '',
+                    subtitle: hero.subtitle || ''
+                };
+            }
+
+            if (features) {
+                updateData.features = {
+                    title: features.title || '',
+                    subtitle: features.subtitle || ''
+                };
+            }
+
+            if (bodyContent !== undefined) {
+                updateData.bodyContent = bodyContent || '';
+            }
+
+            if (pageTitle !== undefined) {
+                updateData.pageTitle = pageTitle || '';
             }
 
             const content = await WebsiteContent.findOneAndUpdate(
                 { pageKey, deletedAt: null },
-                {
-                    pageKey,
-                    hero: {
-                        headline: hero.headline || '',
-                        subtitle: hero.subtitle || ''
-                    },
-                    features: {
-                        title: features.title || '',
-                        subtitle: features.subtitle || ''
-                    },
-                    seo: {
-                        metaTitle: seo.metaTitle || '',
-                        metaDescription: seo.metaDescription || '',
-                        keywords: seo.keywords || ''
-                    },
-                    deletedAt: null // Ensure it's not deleted when upserting
-                },
+                updateData,
                 {
                     upsert: true,
                     new: true,
@@ -82,7 +99,7 @@ class WebsiteContentService {
 
             const content = await WebsiteContent.findOneAndUpdate(
                 { pageKey, deletedAt: null },
-                { 
+                {
                     $set: {
                         ...updateField,
                         deletedAt: null // Ensure it's not deleted when upserting

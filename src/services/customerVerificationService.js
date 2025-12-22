@@ -5,6 +5,7 @@ const CustomerNote = require('../models/CustomerNote');
 const User = require('../models/User');
 const BillingAccount = require('../models/BillingAccount');
 const PaymentMethod = require('../models/PaymentMethod');
+const { sendCustomerVerificationOTPEmail } = require('../utils/emailService');
 const Invoice = require('../models/Invoice');
 
 class CustomerVerificationService {
@@ -80,9 +81,20 @@ class CustomerVerificationService {
                 { upsert: true, new: true }
             );
 
-            // TODO: Actually send OTP via email/SMS service
-            // For now, we'll just return the OTP (in production, remove this)
-            console.log(`OTP for ${isEmail ? email : phone}: ${otpCode}`);
+            // Send OTP via email if channel is email
+            if (channel === 'email' || (!channel && isEmail)) {
+                try {
+                    const customerName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Customer';
+                    await sendCustomerVerificationOTPEmail(email, otpCode, customerName);
+                } catch (emailError) {
+                    console.error('Failed to send OTP email:', emailError);
+                    // Don't throw error, just log it - OTP is already saved
+                    // In production, you might want to handle this differently
+                }
+            } else if (channel === 'sms' || (!channel && !isEmail)) {
+                // TODO: Implement SMS sending service
+                console.log(`OTP for phone ${phone}: ${otpCode} (SMS sending not yet implemented)`);
+            }
 
             return {
                 success: true,
@@ -257,7 +269,7 @@ class CustomerVerificationService {
     // Create customer note
     async createCustomerNote(data) {
         try {
-            const { customerId, noteType, priority, content, tags, createdBy } = data;
+            const { customerId, noteType, priority, content, tags, isCritical, createdBy } = data;
 
             if (!customerId || !content || !createdBy) {
                 throw new Error('Missing required fields: customerId, content, and createdBy are required');
@@ -275,6 +287,7 @@ class CustomerVerificationService {
                 priority: priority || 'Medium',
                 content: content.trim(),
                 tags: tags ? tags.map(t => t.trim()).filter(Boolean) : [],
+                isCritical: isCritical === true || isCritical === 'true',
                 createdBy
             });
 
@@ -312,6 +325,7 @@ class CustomerVerificationService {
                 priority: note.priority,
                 content: note.content,
                 tags: note.tags || [],
+                isCritical: note.isCritical || false,
                 createdBy: note.createdBy._id ? {
                     id: note.createdBy._id.toString(),
                     firstName: note.createdBy.firstName,
@@ -390,6 +404,7 @@ class CustomerVerificationService {
                 priority: note.priority,
                 content: note.content,
                 tags: note.tags || [],
+                isCritical: note.isCritical || false,
                 createdBy: note.createdBy._id ? {
                     id: note.createdBy._id.toString(),
                     firstName: note.createdBy.firstName,
@@ -632,6 +647,7 @@ class CustomerVerificationService {
                 priority: note?.priority,
                 content: note?.content,
                 tags: note?.tags || [],
+                isCritical: note?.isCritical || false,
                 createdBy: note?.createdBy?._id ? {
                     id: note?.createdBy?._id.toString(),
                     firstName: note?.createdBy?.firstName,

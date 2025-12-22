@@ -26,6 +26,11 @@ const customerNoteSchema = new mongoose.Schema({
         type: String,
         trim: true
     }],
+    isCritical: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -53,6 +58,7 @@ customerNoteSchema.methods.toSafeJSON = function () {
         priority: this.priority,
         content: this.content,
         tags: this.tags || [],
+        isCritical: this.isCritical || false,
         createdBy: this.createdBy.toString(),
         createdAt: this.createdAt.toISOString(),
         updatedAt: this.updatedAt.toISOString()

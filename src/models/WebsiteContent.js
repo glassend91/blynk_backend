@@ -54,11 +54,21 @@ const websiteContentSchema = new mongoose.Schema({
     },
     hero: {
         type: heroBlockSchema,
-        required: true
+        required: false
     },
     features: {
         type: featuresBlockSchema,
-        required: true
+        required: false
+    },
+    bodyContent: {
+        type: String,
+        trim: true,
+        default: ''
+    },
+    pageTitle: {
+        type: String,
+        trim: true,
+        default: ''
     },
     seo: {
         type: seoBlockSchema,
@@ -77,12 +87,14 @@ websiteContentSchema.index({ pageKey: 1 });
 websiteContentSchema.index({ deletedAt: 1 });
 
 // Method to convert to safe JSON
-websiteContentSchema.methods.toSafeJSON = function() {
+websiteContentSchema.methods.toSafeJSON = function () {
     return {
         id: this._id,
         pageKey: this.pageKey,
         hero: this.hero,
         features: this.features,
+        bodyContent: this.bodyContent || '',
+        pageTitle: this.pageTitle || '',
         seo: this.seo,
         createdAt: this.createdAt,
         updatedAt: this.updatedAt

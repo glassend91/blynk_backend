@@ -137,6 +137,23 @@ router.post(
 
             console.log('body', req.body);
 
+            // Validate business details: require either ABN or ACN
+            if (businessDetails) {
+                const hasABN = businessDetails.ABN && businessDetails.ABN.trim().length > 0;
+                const hasACN = businessDetails.ACN && businessDetails.ACN.trim().length > 0;
+
+                if (!hasABN && !hasACN) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Either ABN or ACN is required for business signups',
+                        errors: [{
+                            path: 'businessDetails.ABN',
+                            msg: 'Either ABN or ACN must be provided'
+                        }]
+                    });
+                }
+            }
+
             // Check if email is already registered (only block fully registered users)
             const existing = await User.findOne({ email });
             if (existing) {
@@ -255,7 +272,7 @@ router.post(
             } else {
                 // Create new OTP record
                 await OTP.create({
-                    email: email.toLowerCase(),
+                    email: email?.toLowerCase() || '',
                     otp,
                     otpExpiry,
                     verified: false,
@@ -318,7 +335,7 @@ router.post(
             } else {
                 // Create new OTP record
                 await OTP.create({
-                    email: email.toLowerCase(),
+                    email: email?.toLowerCase() || '',
                     otp,
                     otpExpiry,
                     verified: false,
@@ -435,7 +452,7 @@ router.post(
             }
 
             const { email, password } = req.body;
-            const normalizedEmail = String(email).toLowerCase();
+            const normalizedEmail = String(email)?.toLowerCase() || '';
             const user = await User.findOne({ email: normalizedEmail });
             if (!user) {
                 return res.status(401).json({ message: 'Invalid email or password' });
@@ -766,7 +783,7 @@ router.post(
             }
 
             const { firstName, lastName, email, subrole } = req.body;
-            const normalizedEmail = String(email).toLowerCase();
+            const normalizedEmail = String(email)?.toLowerCase() || '';
 
             const existing = await User.findOne({ email: normalizedEmail });
             if (existing) {
