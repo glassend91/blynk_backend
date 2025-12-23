@@ -88,9 +88,15 @@ class CustomerPlansController {
     }
 
     // Get available services
+    // For admins: includes all plans (public, hidden, internal)
+    // For customers: excludes internal plans
     async getAvailableServices(req, res) {
         try {
-            const services = await customerPlansService.getAvailableServices();
+            // Check if user is admin - admins can see all plans including internal
+            const isAdmin = req.user && (req.user.role === 'admin' || req.user.role === 'superAdmin');
+            const includeInternal = isAdmin;
+
+            const services = await customerPlansService.getAvailableServices(includeInternal);
 
             res.status(200).json({
                 success: true,

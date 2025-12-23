@@ -3,6 +3,7 @@ const BillingAccount = require('../models/BillingAccount');
 const User = require('../models/User');
 const ServiceSubscription = require('../models/ServiceSubscription');
 const InvoiceService = require('../services/invoiceService');
+const { generateInvoicePDF, generateInvoiceFilename } = require('../utils/pdfGenerator');
 
 class BillingController {
     // Get billing summary for dashboard
@@ -220,7 +221,7 @@ class BillingController {
         }
     }
 
-    // Download invoice PDF
+    // Download invoice PDF (customer-facing)
     static async downloadInvoice(req, res, next) {
         try {
             const { invoiceId } = req.params;
@@ -229,7 +230,7 @@ class BillingController {
             const invoice = await Invoice.findOne({
                 _id: invoiceId,
                 customerId: userId
-            });
+            }).populate('customerId', 'firstName lastName email phone billingAddress serviceAddress businessDetails');
 
             if (!invoice) {
                 return res.status(404).json({
@@ -238,17 +239,70 @@ class BillingController {
                 });
             }
 
-            // In a real implementation, you would generate a PDF here
-            // For now, we'll return the invoice data
-            res.json({
-                success: true,
-                message: 'PDF generation would be implemented here',
-                data: {
-                    invoiceNumber: invoice.invoiceNumber,
-                    downloadUrl: `/api/billing/invoices/${invoiceId}/pdf`
-                }
-            });
+            const customer = invoice.customerId || await User.findById(userId);
+            if (!customer) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Customer not found'
+                });
+            }
+
+            // Generate PDF
+            const pdfBuffer = await generateInvoicePDF(invoice, customer);
+            const filename = generateInvoiceFilename(invoice, customer);
+
+            // Set response headers for PDF download
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            res.setHeader('Content-Length', pdfBuffer.length);
+
+            res.send(pdfBuffer);
         } catch (error) {
+            console.error('Error generating invoice PDF:', error);
+            next(error);
+        }
+    }
+
+    // Admin: Download invoice PDF for any customer
+    static async downloadCustomerInvoicePDF(req, res, next) {
+        try {
+            const { invoiceId } = req.params;
+
+            const invoice = await Invoice.findById(invoiceId);
+
+            if (!invoice) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Invoice not found'
+                });
+            }
+
+            // Get customer data - populate if needed
+            let customer = invoice.customerId;
+            if (!customer || typeof customer === 'string' || (customer.toString && customer.toString().length === 24)) {
+                customer = await User.findById(invoice.customerId)
+                    .select('firstName lastName email phone billingAddress serviceAddress businessDetails');
+            }
+
+            if (!customer) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Customer not found'
+                });
+            }
+
+            // Generate PDF
+            const pdfBuffer = await generateInvoicePDF(invoice, customer);
+            const filename = generateInvoiceFilename(invoice, customer);
+
+            // Set response headers for PDF download
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            res.setHeader('Content-Length', pdfBuffer.length);
+
+            res.send(pdfBuffer);
+        } catch (error) {
+            console.error('Error generating invoice PDF:', error);
             next(error);
         }
     }
@@ -662,6 +716,60 @@ class BillingController {
             res.json({
                 success: true,
                 data: summary
+            });
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    // Admin: Get invoices for a specific customer
+    static async getCustomerInvoices(req, res, next) {
+        try {
+            const { customerId } = req.params;
+            const { page = 1, limit = 50, status, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+
+            // Validate customerId
+            if (!customerId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Customer ID is required'
+                });
+            }
+
+            const skip = (page - 1) * limit;
+            const filter = { customerId };
+
+            // Add status filter
+            if (status) {
+                filter.status = status;
+            }
+
+            // Build sort object
+            const sort = {};
+            const validSortFields = ['createdAt', 'dueDate', 'total', 'status', 'invoiceNumber'];
+            const sortField = validSortFields.includes(sortBy) ? sortBy : 'createdAt';
+            sort[sortField] = sortOrder === 'asc' ? 1 : -1;
+
+            const invoices = await Invoice.find(filter)
+                .sort(sort)
+                .skip(skip)
+                .limit(parseInt(limit))
+                .populate('paymentMethod', 'type last4')
+                .lean();
+
+            const total = await Invoice.countDocuments(filter);
+
+            res.json({
+                success: true,
+                data: {
+                    invoices,
+                    pagination: {
+                        currentPage: parseInt(page),
+                        totalPages: Math.ceil(total / limit),
+                        totalItems: total,
+                        itemsPerPage: parseInt(limit)
+                    }
+                }
             });
         } catch (error) {
             next(error);

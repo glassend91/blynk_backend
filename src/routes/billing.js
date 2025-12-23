@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, query, validationResult } = require('express-validator');
 const BillingController = require('../controllers/billingController');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -46,10 +46,17 @@ router.get(
     BillingController.getInvoiceById
 );
 
-// Download invoice PDF
+// Download invoice PDF (customer-facing)
 router.get(
     '/invoices/:invoiceId/download',
     BillingController.downloadInvoice
+);
+
+// Admin: Download invoice PDF for any customer
+router.get(
+    '/admin/invoices/:invoiceId/download',
+    requireAdmin,
+    BillingController.downloadCustomerInvoicePDF
 );
 
 // Get current month charges breakdown
@@ -164,6 +171,21 @@ router.post(
 router.get(
     '/invoices/summary',
     BillingController.getInvoiceSummary
+);
+
+// Admin: Get invoices for a specific customer
+router.get(
+    '/admin/customers/:customerId/invoices',
+    requireAdmin,
+    [
+        query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+        query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
+        query('status').optional().isIn(['draft', 'sent', 'paid', 'overdue', 'cancelled']).withMessage('Invalid status'),
+        query('sortBy').optional().isIn(['createdAt', 'dueDate', 'total', 'status', 'invoiceNumber']).withMessage('Invalid sort field'),
+        query('sortOrder').optional().isIn(['asc', 'desc']).withMessage('Sort order must be asc or desc')
+    ],
+    validateRequest,
+    BillingController.getCustomerInvoices
 );
 
 module.exports = router;

@@ -47,9 +47,9 @@ class CustomerPlansService {
                 userId: customer._id,
                 subscriptionStatus: { $in: ['active', 'pending', 'suspended'] }
             })
-            .populate('serviceId', 'serviceName serviceType price currency billingCycle specifications')
-            .sort({ createdAt: -1 })
-            .lean();
+                .populate('serviceId', 'serviceName serviceType price currency billingCycle specifications')
+                .sort({ createdAt: -1 })
+                .lean();
 
             // Format plans
             const plans = subscriptions.map((sub) => {
@@ -59,16 +59,16 @@ class CustomerPlansService {
                 const price = Number(service.price || 0);
                 const currency = service.currency || 'AUD';
                 const billingCycle = service.billingCycle || 'monthly';
-                
+
                 // Format price
                 const formatter = new Intl.NumberFormat('en-AU', {
                     style: 'currency',
                     currency,
                     minimumFractionDigits: 2,
                 });
-                
-                const cycleLabel = billingCycle === 'monthly' ? 'month' : 
-                                 billingCycle === 'quarterly' ? 'quarter' : 'year';
+
+                const cycleLabel = billingCycle === 'monthly' ? 'month' :
+                    billingCycle === 'quarterly' ? 'quarter' : 'year';
                 const priceDisplay = `${formatter.format(price)}/${cycleLabel}`;
 
                 // Format active since date
@@ -114,7 +114,7 @@ class CustomerPlansService {
     async getCustomerPlans(customerId) {
         try {
             const customer = await User.findById(customerId).lean();
-            
+
             if (!customer || customer.role !== 'customer' || customer.isDeleted) {
                 throw new Error('Customer not found');
             }
@@ -123,9 +123,9 @@ class CustomerPlansService {
                 userId: customerId,
                 subscriptionStatus: { $in: ['active', 'pending', 'suspended'] }
             })
-            .populate('serviceId', 'serviceName serviceType price currency billingCycle specifications')
-            .sort({ createdAt: -1 })
-            .lean();
+                .populate('serviceId', 'serviceName serviceType price currency billingCycle specifications')
+                .sort({ createdAt: -1 })
+                .lean();
 
             const plans = subscriptions.map((sub) => {
                 const service = sub.serviceId;
@@ -134,15 +134,15 @@ class CustomerPlansService {
                 const price = Number(service.price || 0);
                 const currency = service.currency || 'AUD';
                 const billingCycle = service.billingCycle || 'monthly';
-                
+
                 const formatter = new Intl.NumberFormat('en-AU', {
                     style: 'currency',
                     currency,
                     minimumFractionDigits: 2,
                 });
-                
-                const cycleLabel = billingCycle === 'monthly' ? 'month' : 
-                                 billingCycle === 'quarterly' ? 'quarter' : 'year';
+
+                const cycleLabel = billingCycle === 'monthly' ? 'month' :
+                    billingCycle === 'quarterly' ? 'quarter' : 'year';
                 const priceDisplay = `${formatter.format(price)}/${cycleLabel}`;
 
                 const activeDate = sub.activatedAt || sub.subscribedAt || sub.createdAt || new Date();
@@ -251,29 +251,39 @@ class CustomerPlansService {
     }
 
     // Get all available services
-    async getAvailableServices() {
+    // If includeInternal is true (for admin), includes all plans (public, hidden, internal)
+    // If includeInternal is false (for customers), excludes internal plans
+    async getAvailableServices(includeInternal = false) {
         try {
-            const services = await Service.find({
+            const query = {
                 isActive: true,
-                isAvailable: true
-            })
-            .select('serviceName serviceType price currency billingCycle specifications')
-            .sort({ serviceName: 1 })
-            .lean();
+                isAvailable: true,
+                isDeleted: { $ne: true }
+            };
+
+            // Exclude internal plans unless explicitly requested (for admin)
+            if (!includeInternal) {
+                query.visibilityStatus = 'public';
+            }
+
+            const services = await Service.find(query)
+                .select('serviceName serviceType price currency billingCycle specifications visibilityStatus')
+                .sort({ serviceName: 1 })
+                .lean();
 
             return services.map((service) => {
                 const price = Number(service.price || 0);
                 const currency = service.currency || 'AUD';
                 const billingCycle = service.billingCycle || 'monthly';
-                
+
                 const formatter = new Intl.NumberFormat('en-AU', {
                     style: 'currency',
                     currency,
                     minimumFractionDigits: 2,
                 });
-                
-                const cycleLabel = billingCycle === 'monthly' ? 'month' : 
-                                 billingCycle === 'quarterly' ? 'quarter' : 'year';
+
+                const cycleLabel = billingCycle === 'monthly' ? 'month' :
+                    billingCycle === 'quarterly' ? 'quarter' : 'year';
                 const priceDisplay = `${formatter.format(price)}/${cycleLabel}`;
 
                 let serviceName = service.serviceName || 'Service';

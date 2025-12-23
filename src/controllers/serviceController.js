@@ -99,6 +99,16 @@ function mapFeaturesPayload(features) {
 }
 
 function mapServiceToAdminRow(service, index) {
+    // Map visibilityStatus to display status
+    let displayStatus = 'Published';
+    if (service.visibilityStatus === 'internal') {
+        displayStatus = 'Staff-Only';
+    } else if (service.visibilityStatus === 'hidden') {
+        displayStatus = 'Hidden';
+    } else if (!service.isActive) {
+        displayStatus = 'Draft';
+    }
+
     return {
         id: index + 1,
         serviceId: service._id.toString(),
@@ -109,20 +119,26 @@ function mapServiceToAdminRow(service, index) {
             : (service.serviceType === 'Mobile' ? 'Mobile' : 'NBN'),
         speedOrData: determineSpeedOrData(service),
         price: formatPriceDisplay(service),
-        status: service.isActive ? 'Published' : 'Draft',
+        status: displayStatus,
+        visibilityStatus: service.visibilityStatus || (service.isActive ? 'public' : 'hidden'),
         customers: service.totalSubscriptions || 0,
     };
 }
 
 class ServiceController {
-    // Get all available services
+    // Get all available services (customer-facing - excludes internal plans)
     static async getServices(req, res) {
         try {
             const { serviceType, category, minPrice, maxPrice, search } = req.query;
             const userId = req.user.id;
 
-            // Build query
-            const query = { isActive: true, isAvailable: true, isDeleted: { $ne: true } };
+            // Build query - exclude internal plans for customer-facing endpoint
+            const query = {
+                visibilityStatus: 'public',
+                isActive: true,
+                isAvailable: true,
+                isDeleted: { $ne: true }
+            };
 
             if (serviceType) {
                 query.serviceType = serviceType;
@@ -290,6 +306,20 @@ class ServiceController {
                 });
             }
 
+            // Map status to visibilityStatus
+            let visibilityStatus = 'public';
+            let isActive = true;
+            if (status === 'Staff-Only') {
+                visibilityStatus = 'internal';
+                isActive = true;
+            } else if (status === 'Hidden') {
+                visibilityStatus = 'hidden';
+                isActive = true;
+            } else if (status === 'Draft') {
+                visibilityStatus = 'public';
+                isActive = false;
+            }
+
             const service = await Service.create({
                 serviceName: serviceName.trim(),
                 serviceType,
@@ -300,7 +330,8 @@ class ServiceController {
                 providerId,
                 specifications: buildSpecifications(serviceType, speedOrData, staticIP, slaDetails),
                 features: mapFeaturesPayload(features),
-                isActive: status !== 'Draft',
+                visibilityStatus,
+                isActive,
                 isAvailable: true,
             });
 
@@ -318,13 +349,17 @@ class ServiceController {
         }
     }
 
-    // Get service by ID
+    // Get service by ID (customer-facing - excludes internal plans)
     static async getServiceById(req, res) {
         try {
             const { serviceId } = req.params;
             const userId = req.user.id;
 
-            const service = await Service.findOne({ _id: serviceId, isDeleted: { $ne: true } })
+            const service = await Service.findOne({
+                _id: serviceId,
+                visibilityStatus: 'public',
+                isDeleted: { $ne: true }
+            })
                 .populate('providerId', 'firstName lastName email');
 
             if (!service) {
@@ -365,8 +400,12 @@ class ServiceController {
             const { assignedAddress, assignedNumber, selectedAddOns, paymentMethodId } = req.body;
             const userId = req.user.id;
 
-            // Check if service exists and is available
-            const service = await Service.findOne({ _id: serviceId, isDeleted: { $ne: true } });
+            // Check if service exists and is available (exclude internal plans for customer subscriptions)
+            const service = await Service.findOne({
+                _id: serviceId,
+                visibilityStatus: 'public',
+                isDeleted: { $ne: true }
+            });
             if (!service || !service.isAvailableForSubscription()) {
                 return res.status(400).json({
                     error: 'Service not available for subscription'
@@ -939,6 +978,20 @@ class ServiceController {
                 });
             }
 
+            // Map status to visibilityStatus
+            let visibilityStatus = 'public';
+            let isActive = true;
+            if (status === 'Staff-Only') {
+                visibilityStatus = 'internal';
+                isActive = true;
+            } else if (status === 'Hidden') {
+                visibilityStatus = 'hidden';
+                isActive = true;
+            } else if (status === 'Draft') {
+                visibilityStatus = 'public';
+                isActive = false;
+            }
+
             // Update service fields
             service.serviceName = serviceName.trim();
             service.serviceType = serviceType;
@@ -948,7 +1001,8 @@ class ServiceController {
             service.billingCycle = billingCycle;
             service.specifications = buildSpecifications(serviceType, speedOrData, staticIP, slaDetails);
             service.features = mapFeaturesPayload(features);
-            service.isActive = status !== 'Draft';
+            service.visibilityStatus = visibilityStatus;
+            service.isActive = isActive;
 
             await service.save();
 

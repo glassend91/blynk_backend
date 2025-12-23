@@ -40,8 +40,8 @@ router.post(
             .withMessage('Price must be a positive number'),
         body('status')
             .optional()
-            .isIn(['Published', 'Draft'])
-            .withMessage('Status must be Published or Draft'),
+            .isIn(['Published', 'Draft', 'Staff-Only', 'Hidden'])
+            .withMessage('Status must be Published, Draft, Staff-Only, or Hidden'),
         body('billingCycle')
             .optional()
             .isIn(['monthly', 'quarterly', 'yearly'])
@@ -81,8 +81,8 @@ router.put(
             .withMessage('Price must be a positive number'),
         body('status')
             .optional()
-            .isIn(['Published', 'Draft'])
-            .withMessage('Status must be Published or Draft'),
+            .isIn(['Published', 'Draft', 'Staff-Only', 'Hidden'])
+            .withMessage('Status must be Published, Draft, Staff-Only, or Hidden'),
         body('billingCycle')
             .optional()
             .isIn(['monthly', 'quarterly', 'yearly'])

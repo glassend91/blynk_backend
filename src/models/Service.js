@@ -81,6 +81,12 @@ const serviceSchema = new mongoose.Schema({
     },
 
     // Service status and availability
+    visibilityStatus: {
+        type: String,
+        enum: ['public', 'hidden', 'internal'],
+        default: 'public'
+    },
+    // Legacy field for backward compatibility - will be computed from visibilityStatus
     isActive: {
         type: Boolean,
         default: true
@@ -252,12 +258,29 @@ serviceSchema.virtual('formattedPrice').get(function () {
     return `${this.currency} $${this.price.toFixed(2)}/${this.billingCycle}`;
 });
 
-// Virtual for service status
+// Virtual for service status (for backward compatibility)
 serviceSchema.virtual('status').get(function () {
     if (!this.isActive) return 'inactive';
     if (!this.isAvailable) return 'unavailable';
     if (this.validUntil && this.validUntil < new Date()) return 'expired';
     return 'active';
+});
+
+// Pre-save middleware to sync visibilityStatus with isActive for backward compatibility
+serviceSchema.pre('save', function (next) {
+    // If visibilityStatus is set but isActive is not explicitly set, sync them
+    if (this.isModified('visibilityStatus') && !this.isModified('isActive')) {
+        this.isActive = this.visibilityStatus !== 'hidden';
+    }
+    // If isActive is set but visibilityStatus is not, sync visibilityStatus
+    if (this.isModified('isActive') && !this.isModified('visibilityStatus')) {
+        if (this.isActive === false) {
+            this.visibilityStatus = 'hidden';
+        } else if (!this.visibilityStatus) {
+            this.visibilityStatus = 'public';
+        }
+    }
+    next();
 });
 
 // Method to get active add-ons
@@ -291,6 +314,7 @@ serviceSchema.set('toObject', { virtuals: true });
 serviceSchema.index({ serviceType: 1, isActive: 1 });
 serviceSchema.index({ isAvailable: 1, isActive: 1 });
 serviceSchema.index({ providerId: 1, isActive: 1 });
+serviceSchema.index({ visibilityStatus: 1, isActive: 1, isDeleted: 1 });
 serviceSchema.index({ price: 1 });
 serviceSchema.index({ tags: 1 });
 serviceSchema.index({ category: 1 });

@@ -3,6 +3,8 @@ const { body, validationResult } = require('express-validator');
 const { authenticateToken, requirePermission } = require('../middleware/auth');
 const BillingAccount = require('../models/BillingAccount');
 const User = require('../models/User');
+const PaymentMethod = require('../models/PaymentMethod');
+const PaymentMethodController = require('../controllers/paymentMethodController');
 
 const router = express.Router();
 
@@ -89,6 +91,251 @@ router.post(
                     reasonCode: reasonCode || 'manual'
                 }
             });
+        } catch (error) {
+            next(error);
+        }
+    }
+);
+
+/**
+ * @route   GET /api/v1/customer/:customerId/payment-methods
+ * @desc    Get all payment methods for a customer (Admin)
+ * @access  Private (Admin with can_manage_customer_payment_details permission)
+ */
+router.get(
+    '/:customerId/payment-methods',
+    requirePermission('can_manage_customer_payment_details'),
+    async (req, res, next) => {
+        try {
+            const { customerId } = req.params;
+
+            // Verify customer exists
+            const customer = await User.findById(customerId);
+            if (!customer || customer.role !== 'customer') {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Customer not found'
+                });
+            }
+
+            const paymentMethods = await PaymentMethod.getActiveForUser(customerId);
+
+            res.json({
+                success: true,
+                data: {
+                    customerId,
+                    paymentMethods: paymentMethods.map(pm => pm.toSafeJSON())
+                }
+            });
+        } catch (error) {
+            next(error);
+        }
+    }
+);
+
+/**
+ * @route   POST /api/v1/customer/:customerId/payment-methods
+ * @desc    Add a new payment method for a customer (Admin)
+ * @access  Private (Admin with can_manage_customer_payment_details permission)
+ * @body    paymentMethodId, billingDetails
+ */
+router.post(
+    '/:customerId/payment-methods',
+    requirePermission('can_manage_customer_payment_details'),
+    [
+        body('paymentMethodId')
+            .notEmpty()
+            .withMessage('Payment method ID is required'),
+        body('billingDetails.name')
+            .optional()
+            .isString()
+            .withMessage('Billing name must be a string'),
+        body('billingDetails.email')
+            .optional()
+            .isEmail()
+            .withMessage('Billing email must be a valid email'),
+        body('billingDetails.phone')
+            .optional()
+            .isString()
+            .withMessage('Billing phone must be a string')
+    ],
+    async (req, res, next) => {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    errors: errors.array()
+                });
+            }
+
+            const { customerId } = req.params;
+            const { paymentMethodId, billingDetails } = req.body;
+
+            // Verify customer exists
+            const customer = await User.findById(customerId);
+            if (!customer || customer.role !== 'customer') {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Customer not found'
+                });
+            }
+
+            // Temporarily override req.user.id for the payment method controller
+            const originalUserId = req.user.id;
+            req.user.id = customerId;
+
+            try {
+                // Use the existing payment method controller logic
+                await PaymentMethodController.createPaymentMethod(req, res, next);
+            } finally {
+                // Restore original user ID
+                req.user.id = originalUserId;
+            }
+        } catch (error) {
+            next(error);
+        }
+    }
+);
+
+/**
+ * @route   PUT /api/v1/customer/:customerId/payment-methods/:paymentMethodId/default
+ * @desc    Set a payment method as default for a customer (Admin)
+ * @access  Private (Admin with can_manage_customer_payment_details permission)
+ */
+router.put(
+    '/:customerId/payment-methods/:paymentMethodId/default',
+    requirePermission('can_manage_customer_payment_details'),
+    async (req, res, next) => {
+        try {
+            const { customerId, paymentMethodId } = req.params;
+
+            // Verify customer exists
+            const customer = await User.findById(customerId);
+            if (!customer || customer.role !== 'customer') {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Customer not found'
+                });
+            }
+
+            // Find the payment method
+            const paymentMethod = await PaymentMethod.findOne({
+                _id: paymentMethodId,
+                user: customerId,
+                isActive: true
+            });
+
+            if (!paymentMethod) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Payment method not found'
+                });
+            }
+
+            // Update the payment method to be default
+            paymentMethod.isDefault = true;
+            await paymentMethod.save();
+
+            res.json({
+                success: true,
+                message: 'Default payment method updated successfully',
+                data: {
+                    customerId,
+                    paymentMethod: paymentMethod.toSafeJSON()
+                }
+            });
+        } catch (error) {
+            next(error);
+        }
+    }
+);
+
+/**
+ * @route   DELETE /api/v1/customer/:customerId/payment-methods/:paymentMethodId
+ * @desc    Delete a payment method for a customer (Admin)
+ * @access  Private (Admin with can_manage_customer_payment_details permission)
+ */
+router.delete(
+    '/:customerId/payment-methods/:paymentMethodId',
+    requirePermission('can_manage_customer_payment_details'),
+    async (req, res, next) => {
+        try {
+            const { customerId, paymentMethodId } = req.params;
+
+            // Verify customer exists
+            const customer = await User.findById(customerId);
+            if (!customer || customer.role !== 'customer') {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Customer not found'
+                });
+            }
+
+            // Find the payment method
+            const paymentMethod = await PaymentMethod.findOne({
+                _id: paymentMethodId,
+                user: customerId,
+                isActive: true
+            });
+
+            if (!paymentMethod) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Payment method not found'
+                });
+            }
+
+            // Temporarily override req.user.id for the payment method controller
+            const originalUserId = req.user.id;
+            req.user.id = customerId;
+
+            try {
+                // Use the existing payment method controller logic
+                req.params.paymentMethodId = paymentMethodId;
+                await PaymentMethodController.deletePaymentMethod(req, res, next);
+            } finally {
+                // Restore original user ID
+                req.user.id = originalUserId;
+            }
+        } catch (error) {
+            next(error);
+        }
+    }
+);
+
+/**
+ * @route   POST /api/v1/customer/:customerId/payment-methods/setup-intent
+ * @desc    Create setup intent for adding payment methods for a customer (Admin)
+ * @access  Private (Admin with can_manage_customer_payment_details permission)
+ */
+router.post(
+    '/:customerId/payment-methods/setup-intent',
+    requirePermission('can_manage_customer_payment_details'),
+    async (req, res, next) => {
+        try {
+            const { customerId } = req.params;
+
+            // Verify customer exists
+            const customer = await User.findById(customerId);
+            if (!customer || customer.role !== 'customer') {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Customer not found'
+                });
+            }
+
+            // Temporarily override req.user.id for the payment method controller
+            const originalUserId = req.user.id;
+            req.user.id = customerId;
+
+            try {
+                // Use the existing payment method controller logic
+                await PaymentMethodController.createSetupIntent(req, res, next);
+            } finally {
+                // Restore original user ID
+                req.user.id = originalUserId;
+            }
         } catch (error) {
             next(error);
         }
