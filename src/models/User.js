@@ -61,6 +61,9 @@ const userSchema = new mongoose.Schema(
             }
         },
         simType: { type: String, enum: ['eSim', 'physical'], default: 'eSim' },
+        // SIM provisioning fields (conditional based on simType)
+        simNumber: { type: String, trim: true }, // ICCID for physical SIM (mandatory when simType is 'physical')
+        esimNotificationEmail: { type: String, trim: true, lowercase: true }, // Email for eSIM notifications (mandatory when simType is 'eSim')
         // Address information (optional)
         addressInformation: {
             streetAddress: { type: String, trim: true },
@@ -110,6 +113,8 @@ userSchema.methods.toSafeJSON = function () {
         dateOfBirth: this.dateOfBirth,
         identity: this.identity,
         simType: this.simType,
+        simNumber: this.simNumber,
+        esimNotificationEmail: this.esimNotificationEmail,
         addressInformation: this.addressInformation,
         twoFactorAuthentication: this.twoFactorAuthentication,
         emailNotifications: this.emailNotifications,

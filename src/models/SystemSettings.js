@@ -18,6 +18,15 @@ const oneviewIntegrationSchema = new mongoose.Schema({
     }
 }, { _id: false });
 
+const connectTelIntegrationSchema = new mongoose.Schema({
+    email: { type: String, default: '', trim: true },
+    password: { type: String, default: '', trim: true },
+    tenantId: { type: String, default: '', trim: true },
+    token: { type: String, default: '', trim: true },
+    tokenUpdatedAt: { type: Date },
+    enabled: { type: Boolean, default: false }
+}, { _id: false });
+
 const zohoIntegrationSchema = new mongoose.Schema({
     clientId: {
         type: String,
@@ -119,6 +128,10 @@ const systemSettingsSchema = new mongoose.Schema({
         },
         zoho: {
             type: zohoIntegrationSchema,
+            default: () => ({})
+        },
+        connectTel: {
+            type: connectTelIntegrationSchema,
             default: () => ({})
         }
     },

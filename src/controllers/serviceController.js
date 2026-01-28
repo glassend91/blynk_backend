@@ -129,6 +129,7 @@ class ServiceController {
     // Get all available services (customer-facing - excludes internal plans)
     static async getServices(req, res) {
         try {
+            console.log('Fetching services with query:', req.query);
             const { serviceType, category, minPrice, maxPrice, search } = req.query;
             const userId = req.user.id;
 
@@ -191,6 +192,53 @@ class ServiceController {
                 error: 'Failed to fetch services',
                 message: error.message
             });
+        }
+    }
+
+    // Public services endpoint for unauthenticated flows (e.g., signup)
+    static async getPublicServices(req, res) {
+        try {
+            console.log('Fetching public services with query:', req.query);
+            const { serviceType, category, minPrice, maxPrice, search } = req.query;
+
+            const query = {
+                visibilityStatus: 'public',
+                isActive: true,
+                isAvailable: true,
+                isDeleted: { $ne: true }
+            };
+
+            if (serviceType) query.serviceType = serviceType;
+            if (category) query.category = category;
+            if (minPrice || maxPrice) {
+                query.price = {};
+                if (minPrice) query.price.$gte = parseFloat(minPrice);
+                if (maxPrice) query.price.$lte = parseFloat(maxPrice);
+            }
+            if (search) query.$text = { $search: search };
+
+            const services = await Service.find(query)
+                .populate('providerId', 'firstName lastName email')
+                .sort({ createdAt: -1 })
+                .lean();
+
+            // Map to a lightweight DTO that the signup UI expects
+            const mapped = services.map(s => ({
+                _id: s._id,
+                serviceName: s.serviceName,
+                serviceType: s.serviceType,
+                price: s.price,
+                currency: s.currency,
+                billingCycle: s.billingCycle,
+                features: s.features || [],
+                specifications: s.specifications || {}
+            }));
+
+            // Return array directly for frontend convenience
+            return res.json(mapped);
+        } catch (error) {
+            console.error('Error fetching public services:', error);
+            return res.status(500).json({ error: 'Failed to fetch public services', message: error.message });
         }
     }
 

@@ -162,6 +162,107 @@ class SystemSettingsService {
         }
     }
 
+    // Update ConnectTel integration settings
+    async updateConnectTel(data) {
+        try {
+            const { email, password, tenantId, enabled } = data;
+
+            const updateData = {};
+            if (email !== undefined) updateData['integrations.connectTel.email'] = email;
+            if (tenantId !== undefined) updateData['integrations.connectTel.tenantId'] = tenantId;
+            if (enabled !== undefined) updateData['integrations.connectTel.enabled'] = enabled;
+            if (password) updateData['integrations.connectTel.password'] = password;
+
+            if (Object.keys(updateData).length === 0) {
+                return this.getSettings();
+            }
+
+            const settings = await SystemSettings.findOneAndUpdate(
+                { settingsKey: 'system' },
+                { $set: updateData },
+                {
+                    upsert: true,
+                    new: true,
+                    runValidators: true
+                }
+            );
+
+            return settings.toSafeJSON();
+        } catch (error) {
+            throw new Error(`Failed to update ConnectTel settings: ${error.message}`);
+        }
+    }
+
+    // Login to ConnectTel and save token
+    async loginToConnectTel(credentials = {}) {
+        try {
+            const { email: bodyEmail, password: bodyPassword, tenantId: bodyTenantId } = credentials;
+
+            // If credentials are provided in the body, save them first
+            if (bodyEmail || bodyPassword || bodyTenantId) {
+                const updateData = {};
+                if (bodyEmail) updateData['integrations.connectTel.email'] = bodyEmail;
+                if (bodyPassword) updateData['integrations.connectTel.password'] = bodyPassword;
+                if (bodyTenantId) updateData['integrations.connectTel.tenantId'] = bodyTenantId;
+
+                await SystemSettings.updateOne(
+                    { settingsKey: 'system' },
+                    { $set: updateData },
+                    { upsert: true }
+                );
+            }
+
+            const settingsDoc = await SystemSettings.findOne({ settingsKey: 'system' });
+            if (!settingsDoc || !settingsDoc.integrations?.connectTel) {
+                throw new Error('ConnectTel settings not found');
+            }
+
+            const { email, password, tenantId } = settingsDoc.integrations.connectTel;
+
+            if (!email || !password || !tenantId) {
+                throw new Error('Email, password, and tenant ID are required for ConnectTel login');
+            }
+
+            const response = await axios.post('https://connecttel.oneview.net.au/api/v1/login', {
+                email,
+                password
+            }, {
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-Tenant-Id': tenantId
+                }
+            });
+
+            if (response.data?.data?.token) {
+                const token = response.data.data.token;
+
+                const tokenUpdatedAt = new Date();
+                await SystemSettings.updateOne(
+                    { settingsKey: 'system' },
+                    {
+                        $set: {
+                            'integrations.connectTel.token': token,
+                            'integrations.connectTel.tokenUpdatedAt': tokenUpdatedAt
+                        }
+                    }
+                );
+
+                return {
+                    success: true,
+                    message: 'Authenticated successfully',
+                    token,
+                    tokenUpdatedAt
+                };
+            } else {
+                throw new Error('No token received from ConnectTel');
+            }
+        } catch (error) {
+            const message = error.response?.data?.meta?.message || error.message;
+            throw new Error(`ConnectTel login failed: ${message}`);
+        }
+    }
+
     // Test Oneview connection
     async testOneviewConnection(apiEndpoint, apiKey) {
         try {

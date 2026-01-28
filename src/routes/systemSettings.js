@@ -55,5 +55,20 @@ router.put('/system', systemSettingsController.updateSystem);
  */
 router.post('/integrations/oneview/test', systemSettingsController.testOneviewConnection);
 
+/**
+ * @route   PUT /api/system-settings/integrations/connect-tel
+ * @desc    Update ConnectTel integration settings
+ * @access  Private (Admin)
+ * @body    { email, password, tenantId, enabled }
+ */
+router.put('/integrations/connect-tel', systemSettingsController.updateConnectTel);
+
+/**
+ * @route   POST /api/system-settings/integrations/connect-tel/login
+ * @desc    Login to ConnectTel and save token
+ * @access  Private (Admin)
+ */
+router.post('/integrations/connect-tel/login', systemSettingsController.loginToConnectTel);
+
 module.exports = router;
 

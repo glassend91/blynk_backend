@@ -99,6 +99,43 @@ class SystemSettingsController {
         }
     }
 
+    // Update ConnectTel integration settings
+    async updateConnectTel(req, res) {
+        try {
+            const settings = await systemSettingsService.updateConnectTel(req.body);
+
+            res.status(200).json({
+                success: true,
+                message: 'ConnectTel settings updated successfully',
+                data: settings
+            });
+        } catch (error) {
+            res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+    // Login to ConnectTel and save token
+    async loginToConnectTel(req, res) {
+        try {
+            const result = await systemSettingsService.loginToConnectTel(req.body);
+
+            res.status(200).json({
+                success: true,
+                message: result.message,
+                token: result.token,
+                tokenUpdatedAt: result.tokenUpdatedAt
+            });
+        } catch (error) {
+            res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
     // Test Oneview connection
     async testOneviewConnection(req, res) {
         try {

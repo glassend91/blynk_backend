@@ -5,7 +5,10 @@ const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Apply authentication to all routes
+// Public: fetch services for unauthenticated flows (signup, marketing)
+router.get('/', ServiceController.getPublicServices);
+
+// Apply authentication to all routes after the public ones
 router.use(authenticateToken);
 
 // Validation middleware
@@ -128,7 +131,7 @@ router.delete(
     ServiceController.deleteService
 );
 
-// Get all available services with optional filtering
+// (Protected) Get all available services with optional filtering - requires auth
 router.get(
     '/',
     ServiceController.getServices

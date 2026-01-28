@@ -8,7 +8,8 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "seed:roles": "node src/scripts/seedRoles.js",
-    "seed:super-admin": "node src/scripts/seedSuperAdmin.js"
+    "seed:super-admin": "node src/scripts/seedSuperAdmin.js",
+    "seed:services": "node src/scripts/seedServices.js"
   },
   "keywords": [],
   "author": "",

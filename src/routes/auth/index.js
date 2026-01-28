@@ -8,6 +8,9 @@ const OTP = require('../../models/OTP');
 const PackageSelection = require('../../models/PackageSelection');
 const Role = require('../../models/Role');
 const { sendOTPEmail, sendWelcomeEmail, sendAdminInviteEmail } = require('../../utils/emailService');
+const Service = require('../../models/Service');
+const ServiceSubscription = require('../../models/ServiceSubscription');
+const otpProviderService = require('../../services/otpProviderService');
 
 const router = express.Router();
 
@@ -104,6 +107,8 @@ router.post(
             return typeof value === 'object' && !Array.isArray(value);
         }).withMessage('Business details must be an object or null'),
         body('simType').optional().isIn(['eSim', 'physical']),
+        body('simNumber').optional().isString().trim(), // ICCID for physical SIM
+        body('esimNotificationEmail').optional().isEmail().withMessage('Valid email is required for eSIM notification'), // Email for eSIM notifications
         body('selectedPlan').optional().isObject().withMessage('Selected plan must be an object'),
         body('customerType').optional().isIn(['residential', 'business']).withMessage('Customer type must be residential or business'),
     ],
@@ -131,6 +136,8 @@ router.post(
                 identity,
                 businessDetails,
                 simType,
+                simNumber,
+                esimNotificationEmail,
                 selectedPlan,
                 customerType,
             } = req.body;
@@ -162,6 +169,48 @@ router.post(
                 });
             }
 
+            // Validate conditional SIM fields based on simType
+            // For mobile services (MBL, MBB), validate SIM provisioning fields
+            if ((type === 'MBL' || type === 'MBB') && simType) {
+                if (simType === 'physical') {
+                    // Physical SIM: simNumber (ICCID) is mandatory
+                    if (!simNumber || !simNumber.trim()) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'SIM Card Number (ICCID) is required for physical SIM',
+                            errors: [{
+                                path: 'simNumber',
+                                msg: 'SIM Card Number (ICCID) is mandatory for physical SIM'
+                            }]
+                        });
+                    }
+                } else if (simType === 'eSim') {
+                    // eSIM: esimNotificationEmail is mandatory
+                    if (!esimNotificationEmail || !esimNotificationEmail.trim()) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'eSIM Notification Email is required for eSIM',
+                            errors: [{
+                                path: 'esimNotificationEmail',
+                                msg: 'eSIM Notification Email is mandatory for eSIM'
+                            }]
+                        });
+                    }
+                    // Validate email format
+                    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    if (!emailRegex.test(esimNotificationEmail)) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Invalid eSIM notification email format',
+                            errors: [{
+                                path: 'esimNotificationEmail',
+                                msg: 'Please provide a valid email address'
+                            }]
+                        });
+                    }
+                }
+            }
+
             const passwordHash = await bcrypt.hash(password, 10);
 
             // Determine customerType if not provided
@@ -188,6 +237,8 @@ router.post(
                 identity,
                 businessDetails,
                 simType,
+                simNumber: simType === 'physical' ? simNumber : undefined, // Only store if physical SIM
+                esimNotificationEmail: simType === 'eSim' ? (esimNotificationEmail || email).toLowerCase() : undefined, // Default to account email if not provided
                 passwordHash,
                 customerType: finalCustomerType,
                 otpVerified: false,
@@ -195,23 +246,101 @@ router.post(
 
             const token = createToken(user.id);
 
+            // Create a service subscription for the new user so plans appear in customer portal
+            (async () => {
+                try {
+                    let serviceToSubscribe = null;
+                    // Prefer explicit selectedPlan id from request
+                    if (selectedPlan && (selectedPlan.id || selectedPlan._id)) {
+                        try {
+                            serviceToSubscribe = await Service.findById(selectedPlan.id || selectedPlan._id);
+                        } catch (e) {
+                            // ignore and fallback to default
+                        }
+                    }
+
+                    // Fallback: find a default service by signup type
+                    if (!serviceToSubscribe) {
+                        const TYPE_TO_SERVICE_TYPE = {
+                            NBN: 'NBN',
+                            MBL: 'Mobile',
+                            MBB: 'Data Only',
+                            SME: 'Business NBN'
+                        };
+                        const serviceTypeForQuery = TYPE_TO_SERVICE_TYPE[type];
+                        if (serviceTypeForQuery) {
+                            try {
+                                serviceToSubscribe = await Service.findOne({ serviceType: serviceTypeForQuery, isAvailable: true, isActive: true }).sort({ price: 1 });
+                            } catch (svcErr) {
+                                console.error('Error fetching default service for subscription creation:', svcErr);
+                            }
+                        }
+                    }
+
+                    if (serviceToSubscribe) {
+                        const subscriptionPrice = serviceToSubscribe.price || (selectedPlan && selectedPlan.price) || 0;
+                        await ServiceSubscription.create({
+                            serviceId: serviceToSubscribe._id,
+                            userId: user._id,
+                            subscriptionStatus: 'active',
+                            subscribedAt: new Date(),
+                            activatedAt: new Date(),
+                            subscriptionPrice,
+                            currency: serviceToSubscribe.currency || 'AUD',
+                            billingCycle: serviceToSubscribe.billingCycle || 'monthly'
+                        });
+                    }
+                } catch (subErr) {
+                    console.error('Failed to create initial service subscription:', subErr);
+                }
+            })();
+
             // Send order confirmation email for NBN, MBL, and MBB signups
             if (type === 'NBN' || type === 'MBL' || type === 'MBB') {
                 try {
                     const { sendOrderConfirmationEmail } = require('../../utils/emailService');
-                    // Use selected plan from request, fallback to default values
+                    // Use selected plan from request; otherwise query DB for a default service plan
                     let planName = 'Plan';
                     let amount = 0;
 
-                    if (type === 'NBN') {
-                        planName = (selectedPlan && selectedPlan.name) ? selectedPlan.name : 'NBN Plan';
-                        amount = (selectedPlan && selectedPlan.price) ? selectedPlan.price : 69.99;
-                    } else if (type === 'MBL') {
-                        planName = (selectedPlan && selectedPlan.name) ? selectedPlan.name : 'Mobile Voice Plan';
-                        amount = (selectedPlan && selectedPlan.price) ? selectedPlan.price : 35.00;
-                    } else if (type === 'MBB') {
-                        planName = (selectedPlan && selectedPlan.name) ? selectedPlan.name : 'Mobile Broadband Plan';
-                        amount = (selectedPlan && selectedPlan.price) ? selectedPlan.price : 35.00;
+                    const TYPE_TO_SERVICE_TYPE = {
+                        NBN: 'NBN',
+                        MBL: 'Mobile',
+                        MBB: 'Data Only',
+                        SME: 'Business NBN'
+                    };
+
+                    if (selectedPlan && selectedPlan.name) {
+                        planName = selectedPlan.name;
+                        amount = selectedPlan.price || 0;
+                    } else {
+                        // Try to find a matching service in DB for the signup type
+                        const serviceTypeForQuery = TYPE_TO_SERVICE_TYPE[type];
+                        if (serviceTypeForQuery) {
+                            try {
+                                const svc = await Service.findOne({ serviceType: serviceTypeForQuery, isAvailable: true, isActive: true }).sort({ price: 1 }).lean();
+                                if (svc) {
+                                    planName = svc.serviceName || serviceTypeForQuery;
+                                    amount = svc.price || 0;
+                                }
+                            } catch (svcErr) {
+                                console.error('Error fetching default service plan for signup:', svcErr);
+                            }
+                        }
+
+                        // Final fallback to previous static defaults if DB lookup failed
+                        if (!planName || planName === 'Plan') {
+                            if (type === 'NBN') {
+                                planName = 'NBN Plan';
+                                amount = 69.99;
+                            } else if (type === 'MBL') {
+                                planName = 'Mobile Voice Plan';
+                                amount = 35.00;
+                            } else if (type === 'MBB') {
+                                planName = 'Mobile Broadband Plan';
+                                amount = 35.00;
+                            }
+                        }
                     }
 
                     await sendOrderConfirmationEmail(
@@ -281,19 +410,49 @@ router.post(
                 });
             }
 
-            // Send OTP email (no user required)
+            // Send OTP via SMS (if user has phone)
             try {
-                await sendOTPEmail(email, otp, 'User'); // Generic name since user doesn't exist yet
-                return res.json({
-                    success: true,
-                    message: 'OTP sent to your email successfully',
-                    expiresIn: `${OTP_EXPIRY_MINUTES} minutes`
-                });
-            } catch (emailError) {
-                console.error('Failed to send OTP email:', emailError);
+                // Find user to get phone number if available
+                const user = await User.findOne({ email: email.toLowerCase() });
+
+                if (!user || !user.phone) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'No mobile number associated with this account. SMS OTP cannot be sent.'
+                    });
+                }
+
+                // Send SMS OTP via external provider
+                const smsRes = await otpProviderService.sendSMSOTP(user.phone);
+
+                if (smsRes.success) {
+                    const transactionId = smsRes.data?.transactionId || smsRes.data?.data?.transactionId;
+                    console.log(`[AUTH OTP] SMS sent successfully. Transaction ID: ${transactionId}`);
+
+                    // Update OTP record with transactionId
+                    const otpRecord = await OTP.findOne({ email: email.toLowerCase(), verified: false }).sort({ createdAt: -1 });
+                    if (otpRecord) {
+                        otpRecord.transactionId = transactionId;
+                        await otpRecord.save();
+                    }
+
+                    return res.json({
+                        success: true,
+                        message: `OTP sent to ${user.phone} successfully`,
+                        expiresIn: `${OTP_EXPIRY_MINUTES} minutes`
+                    });
+                } else {
+                    console.error(`[AUTH OTP] SMS failed:`, smsRes.error || smsRes.message);
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Failed to send SMS OTP. Please try again.'
+                    });
+                }
+            } catch (err) {
+                console.error('Failed to send SMS OTP:', err);
                 return res.status(500).json({
                     success: false,
-                    message: 'Failed to send OTP email. Please try again.'
+                    message: 'An unexpected error occurred. Please try again.'
                 });
             }
         } catch (err) {
@@ -301,6 +460,7 @@ router.post(
         }
     }
 );
+
 
 // Resend OTP - Same as send OTP (uses OTP model)
 router.post(
@@ -344,19 +504,49 @@ router.post(
                 });
             }
 
-            // Send OTP email (no user required)
+            // Send OTP via SMS (if user has phone)
             try {
-                await sendOTPEmail(email, otp, 'User');
-                return res.json({
-                    success: true,
-                    message: 'OTP resent to your email successfully',
-                    expiresIn: `${OTP_EXPIRY_MINUTES} minutes`
-                });
-            } catch (emailError) {
-                console.error('Failed to resend OTP email:', emailError);
+                // Find user to get phone number if available
+                const user = await User.findOne({ email: email.toLowerCase() });
+
+                if (!user || !user.phone) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'No mobile number associated with this account. SMS OTP cannot be sent.'
+                    });
+                }
+
+                // Send SMS OTP via external provider
+                const smsRes = await otpProviderService.sendSMSOTP(user.phone);
+
+                if (smsRes.success) {
+                    const transactionId = smsRes.data?.transactionId || smsRes.data?.data?.transactionId;
+                    console.log(`[AUTH RESEND OTP] SMS sent successfully. Transaction ID: ${transactionId}`);
+
+                    // Update OTP record with transactionId
+                    const otpRecord = await OTP.findOne({ email: email.toLowerCase(), verified: false }).sort({ createdAt: -1 });
+                    if (otpRecord) {
+                        otpRecord.transactionId = transactionId;
+                        await otpRecord.save();
+                    }
+
+                    return res.json({
+                        success: true,
+                        message: `OTP resent to ${user.phone} successfully`,
+                        expiresIn: `${OTP_EXPIRY_MINUTES} minutes`
+                    });
+                } else {
+                    console.error(`[AUTH RESEND OTP] SMS failed:`, smsRes.error || smsRes.message);
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Failed to resend SMS OTP. Please try again.'
+                    });
+                }
+            } catch (err) {
+                console.error('Failed to resend SMS OTP:', err);
                 return res.status(500).json({
                     success: false,
-                    message: 'Failed to resend OTP email. Please try again.'
+                    message: 'An unexpected error occurred. Please try again.'
                 });
             }
         } catch (err) {
@@ -364,6 +554,7 @@ router.post(
         }
     }
 );
+
 
 // Verify OTP - Uses OTP model (independent of user creation)
 router.post(
@@ -385,56 +576,77 @@ router.post(
             const { email, code } = req.body;
 
             // Find OTP record for this email
-            const otpRecord = await OTP.getActiveOTP(email);
+            const otpRecord = await OTP.findOne({
+                email: email.toLowerCase(),
+                verified: false
+            }).sort({ createdAt: -1 });
 
             if (!otpRecord) {
                 return res.status(400).json({
                     success: false,
-                    verified: false,
-                    message: 'No OTP found for this email. Please request OTP first.'
+                    message: 'No active OTP found for this email. Please request a new OTP.'
                 });
             }
 
-            // Check if OTP is expired
-            if (new Date() > otpRecord.otpExpiry) {
+            if (!otpRecord.isValid()) {
                 return res.status(400).json({
                     success: false,
-                    verified: false,
-                    message: 'OTP has expired. Please request a new OTP.'
+                    message: 'OTP has expired or reached maximum attempts. Please request a new OTP.'
                 });
             }
 
-            // Check attempt limit
-            if (otpRecord.attempts >= otpRecord.maxAttempts) {
-                return res.status(400).json({
-                    success: false,
-                    verified: false,
-                    message: 'Too many verification attempts. Please request a new OTP.'
-                });
-            }
+            // Verify via external provider
+            if (otpRecord.transactionId) {
+                const verifyRes = await otpProviderService.verifySMSOTP(otpRecord.transactionId, code);
 
-            // Verify OTP
-            if (otpRecord.otp !== code) {
-                otpRecord.attempts += 1;
+                if (verifyRes.success && (verifyRes.data?.success || verifyRes.data?.verified)) {
+                    // OTP verified successfully
+                    otpRecord.verified = true;
+                    otpRecord.verifiedAt = new Date();
+                    await otpRecord.save();
+
+                    // Update user's verified status if user exists
+                    await User.findOneAndUpdate({ email: email.toLowerCase() }, { otpVerified: true });
+
+                    return res.json({
+                        success: true,
+                        message: 'Email/Mobile verified successfully'
+                    });
+                } else {
+                    otpRecord.attempts += 1;
+                    await otpRecord.save();
+
+                    const errorMessage = verifyRes.error?.message || verifyRes.message || 'Invalid OTP code. Please try again.';
+                    return res.status(400).json({
+                        success: false,
+                        message: errorMessage
+                    });
+                }
+            } else {
+                // Fallback for legacy OTP or email (though email is currently commented out)
+                if (otpRecord.otp !== code) {
+                    otpRecord.attempts += 1;
+                    await otpRecord.save();
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Invalid OTP code. Please try again.'
+                    });
+                }
+
+                // OTP verified successfully
+                otpRecord.verified = true;
+                otpRecord.verifiedAt = new Date();
                 await otpRecord.save();
-                return res.status(400).json({
-                    success: false,
-                    verified: false,
-                    message: 'Invalid OTP code. Please try again.',
-                    attemptsRemaining: otpRecord.maxAttempts - otpRecord.attempts
+
+                // Update user's verified status
+                await User.findOneAndUpdate({ email: email.toLowerCase() }, { otpVerified: true });
+
+                return res.json({
+                    success: true,
+                    message: 'Email/Mobile verified successfully'
                 });
             }
 
-            // OTP verified successfully
-            otpRecord.verified = true;
-            otpRecord.verifiedAt = new Date();
-            await otpRecord.save();
-
-            return res.json({
-                success: true,
-                verified: true,
-                message: 'Email verified successfully'
-            });
         } catch (err) {
             next(err);
         }

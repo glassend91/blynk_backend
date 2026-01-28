@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const router = express.Router();
 const { sendOTPEmail } = require('../utils/emailService');
+const otpProviderService = require('../services/otpProviderService');
 
 // Generate 6-digit OTP
 function generateOTP() {
@@ -59,23 +60,45 @@ router.post(
                 attempts: 0
             });
 
-            // Send OTP via email
+            // Send OTP via SMS
             try {
-                await sendOTPEmail(email, otp, 'User');
-                console.log(`[MOBILE PORTING OTP] Phone: ${phoneNumber}, Email: ${email}, OTP sent via email`);
+                // Send email OTP (commented out)
+                /* 
+                const emailPromise = sendOTPEmail(email, otp, 'User');
+                */
 
-                return res.json({
-                    success: true,
-                    message: `OTP sent to ${email} successfully for porting verification`,
-                    expiresIn: `${OTP_EXPIRY_MINUTES} minutes`
-                });
-            } catch (emailError) {
-                console.error('Failed to send OTP email:', emailError);
-                return res.status(500).json({
-                    success: false,
-                    message: 'Failed to send OTP email. Please try again.'
-                });
+                // Send SMS OTP via external provider
+                const smsRes = await otpProviderService.sendSMSOTP(phoneNumber);
+
+                if (smsRes.success) {
+                    const transactionId = smsRes.data?.transactionId || smsRes.data?.data?.transactionId;
+                    console.log(`[MOBILE PORTING OTP] SMS sent successfully. Transaction ID: ${transactionId}`);
+
+                    // Store transactionId for verification
+                    const storedData = otpStore.get(phoneNumber);
+                    if (storedData) {
+                        storedData.transactionId = transactionId;
+                        otpStore.set(phoneNumber, storedData);
+                    }
+
+                    return res.json({
+                        success: true,
+                        message: `OTP sent to ${phoneNumber} successfully for porting verification`,
+                        expiresIn: `${OTP_EXPIRY_MINUTES} minutes`,
+                        transactionId // Optional: send to frontend if needed
+                    });
+                } else {
+                    console.error(`[MOBILE PORTING OTP] SMS failed:`, smsRes.error || smsRes.message);
+                    return res.status(500).json({
+                        success: false,
+                        message: smsRes.error.message || smsRes.message || 'Failed to send SMS OTP. Please try again.'
+                    });
+                }
+            } catch (err) {
+                console.error('Error in send-otp flow:', err);
+                next(err);
             }
+
         } catch (err) {
             next(err);
         }
@@ -108,11 +131,11 @@ router.post(
             // Get stored OTP
             const storedData = otpStore.get(phoneNumber);
 
-            if (!storedData) {
+            if (!storedData || !storedData.transactionId) {
                 return res.status(400).json({
                     success: false,
                     verified: false,
-                    message: 'No OTP found for this phone number. Please request OTP first.'
+                    message: !storedData ? 'No OTP found for this phone number. Please request OTP first.' : 'No active OTP transaction found. Please request a new OTP.'
                 });
             }
 
@@ -126,35 +149,41 @@ router.post(
                 });
             }
 
-            // Check attempt limit (prevent brute force)
-            if (storedData.attempts >= 5) {
-                otpStore.delete(phoneNumber);
-                return res.status(400).json({
-                    success: false,
-                    verified: false,
-                    message: 'Too many verification attempts. Please request a new OTP.'
-                });
-            }
 
-            // Verify OTP
-            if (storedData.otp !== otp) {
+            // Check attempt limit
+            // if (storedData.attempts >= 5) {
+            //     otpStore.delete(phoneNumber);
+            //     return res.status(400).json({
+            //         success: false,
+            //         verified: false,
+            //         message: 'Too many verification attempts. Please request a new OTP.'
+            //     });
+            // }
+
+            // Verify via external provider
+            const verifyRes = await otpProviderService.verifySMSOTP(storedData.transactionId, otp);
+
+            if (verifyRes.success && (verifyRes.data?.success || verifyRes.data?.verified)) {
+                // OTP verified successfully - remove from store
+                otpStore.delete(phoneNumber);
+
+                return res.json({
+                    success: true,
+                    verified: true,
+                    message: 'Phone number ownership verified successfully for porting'
+                });
+            } else {
                 storedData.attempts += 1;
                 otpStore.set(phoneNumber, storedData);
+
+                const errorMessage = verifyRes.error?.message || verifyRes.message || 'Invalid OTP code. Please try again.';
                 return res.status(400).json({
                     success: false,
                     verified: false,
-                    message: 'Invalid OTP code. Please try again.'
+                    message: errorMessage
                 });
             }
 
-            // OTP verified successfully - remove from store
-            otpStore.delete(phoneNumber);
-
-            return res.json({
-                success: true,
-                verified: true,
-                message: 'Phone number ownership verified successfully for porting'
-            });
         } catch (err) {
             next(err);
         }
