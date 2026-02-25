@@ -5,6 +5,7 @@ const Role = require('../models/Role');
 const PaymentMethod = require('../models/PaymentMethod');
 const BillingAccount = require('../models/BillingAccount');
 const Invoice = require('../models/Invoice');
+const wholesalerService = require('../services/wholesalerService');
 
 const BILLING_LABELS = {
     monthly: 'Month',
@@ -863,6 +864,75 @@ class ServiceController {
         }
     }
 
+    /**
+     * Public: Get NBN address autocomplete suggestions from wholesaler
+     */
+    static async getWholesalerAddressAutocomplete(req, res) {
+        try {
+            const { query } = req.query;
+            if (!query) {
+                return res.json({ success: true, data: { addresses: [] } });
+            }
+
+            const result = await wholesalerService.getAddressAutocomplete(query);
+            if (result.success) {
+                return res.json(result.data);
+            } else {
+                return res.status(500).json(result);
+            }
+        } catch (error) {
+            console.error('Error fetching wholesaler address autocomplete:', error);
+            return res.status(500).json({ success: false, message: error.message });
+        }
+    }
+
+    /**
+     * Public: Perform NBN availability check (Search + SQ)
+     */
+    static async getNbnAvailability(req, res) {
+        try {
+            const { address } = req.body;
+            if (!address) {
+                return res.status(400).json({ success: false, message: 'Address is required' });
+            }
+
+            console.log(`[NBN AVAILABILITY] Checking availability for: ${address}`);
+
+            // 1. Search for address to get locId
+            const searchResult = await wholesalerService.searchNbnAddress(address);
+            if (!searchResult.success) {
+                return res.status(500).json(searchResult);
+            }
+
+            const locations = searchResult.data?.locations || [];
+            if (locations.length === 0) {
+                return res.status(404).json({ success: false, message: 'Location not found' });
+            }
+
+            const locId = locations[0].locId;
+            if (!locId) {
+                return res.status(500).json({ success: false, message: 'Could not retrieve Location ID' });
+            }
+
+            // 2. Perform SQ using locId
+            const sqResult = await wholesalerService.getNbnServiceQualification(locId);
+            if (!sqResult.success) {
+                return res.status(500).json(sqResult);
+            }
+
+            return res.json({
+                success: true,
+                locId,
+                location: locations[0],
+                ...sqResult.data
+            });
+
+        } catch (error) {
+            console.error('Error in NBN availability check:', error);
+            return res.status(500).json({ success: false, message: error.message });
+        }
+    }
+
     // Cancel subscription
     static async cancelSubscription(req, res) {
         try {
@@ -1182,6 +1252,23 @@ class ServiceController {
                 success: false,
                 message: 'Failed to delete service',
             });
+        }
+    }
+
+    /**
+     * Fetch rate plans from wholesaler (ConnectTel)
+     */
+    static async getWholesalerRatePlans(req, res) {
+        try {
+            const result = await wholesalerService.getRatePlans();
+            if (result.success) {
+                return res.status(200).json(result);
+            } else {
+                return res.status(500).json(result);
+            }
+        } catch (error) {
+            console.error('Error fetching wholesaler rate plans:', error);
+            res.status(500).json({ success: false, message: 'Failed to fetch rate plans from wholesaler' });
         }
     }
 }

@@ -8,6 +8,15 @@ const router = express.Router();
 // Public: fetch services for unauthenticated flows (signup, marketing)
 router.get('/', ServiceController.getPublicServices);
 
+// Public: fetch wholesaler rate plans (used in signup)
+router.get('/wholesaler/rate-plans', ServiceController.getWholesalerRatePlans);
+
+// Public: fetch wholesaler address autocomplete (used in signup)
+router.get('/wholesaler/address-autocomplete', ServiceController.getWholesalerAddressAutocomplete);
+
+// Public: check NBN availability (Search + SQ)
+router.post('/wholesaler/nbn-availability', ServiceController.getNbnAvailability);
+
 // Apply authentication to all routes after the public ones
 router.use(authenticateToken);
 
