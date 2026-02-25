@@ -198,24 +198,26 @@ router.get(
     '/reserve/numbers',
     async (req, res, next) => {
         try {
-            // TODO: Integrate with actual mobile number provider API
-            // For now, return mock numbers
-            const availableNumbers = [
-                '0412 345 678',
-                '0423 456 789',
-                '0434 567 890',
-                '0445 678 901',
-                '0456 789 012',
-                '0467 890 123',
-                '0478 901 234',
-                '0489 012 345',
-            ];
+            const apiRes = await otpProviderService.getAvailableNumbers();
+
+            if (!apiRes.success) {
+                return res.status(500).json({
+                    success: false,
+                    message: apiRes.message || 'Failed to fetch available numbers'
+                });
+            }
+
+            // Transform the object structure from ConnectTel into a simple array of strings
+            // ConnectTel returns: { data: { numbers: { "0412345678": { ... }, ... } } }
+            const numbersData = apiRes.data?.data?.numbers || {};
+            const availableNumbers = Object.keys(numbersData);
 
             return res.json({
                 success: true,
                 numbers: availableNumbers
             });
         } catch (err) {
+            console.error('[MOBILE ROUTE] Error in /reserve/numbers:', err);
             next(err);
         }
     }

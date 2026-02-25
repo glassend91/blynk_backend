@@ -117,6 +117,44 @@ const otpProviderService = {
                 message: 'Failed to verify SMS OTP via provider'
             };
         }
+    },
+
+    /**
+     * Fetch available mobile numbers from ConnectTel API
+     * @returns {Promise<Object>} - API response containing available numbers
+     */
+    getAvailableNumbers: async () => {
+        try {
+            const { token, tenantId } = await getCredentials();
+            const API_URL = 'https://connecttel.oneview.net.au/api/v1/mobile/reserve/numbers';
+
+            if (!token || !tenantId) {
+                console.error('[OTP PROVIDER] Missing credentials for fetching numbers');
+                return {
+                    success: false,
+                    message: 'ConnectTel credentials not configured'
+                };
+            }
+
+            console.log('[OTP PROVIDER] Fetching available numbers from ConnectTel...');
+
+            const response = await axios.get(API_URL, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'X-Tenant-Id': tenantId,
+                    'Accept': 'application/json'
+                }
+            });
+
+            return { success: true, data: response.data };
+        } catch (error) {
+            console.error('[OTP PROVIDER] External API Error (Fetch Numbers):', error.response?.data || error.message);
+            return {
+                success: false,
+                error: error.response?.data || error.message,
+                message: 'Failed to fetch mobile numbers from provider'
+            };
+        }
     }
 };
 

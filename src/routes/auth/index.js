@@ -11,6 +11,7 @@ const { sendOTPEmail, sendWelcomeEmail, sendAdminInviteEmail } = require('../../
 const Service = require('../../models/Service');
 const ServiceSubscription = require('../../models/ServiceSubscription');
 const otpProviderService = require('../../services/otpProviderService');
+const wholesalerService = require('../../services/wholesalerService');
 
 const router = express.Router();
 
@@ -354,6 +355,57 @@ router.post(
                     console.error('Error sending order confirmation email:', emailError);
                     // Don't fail the signup if email fails
                 }
+            }
+
+            // 6. Create Customer in Wholesaler System (Step 2)
+            try {
+                // Only create wholesaler account if user creation was successful
+                if (user && user._id) {
+                    const wholesalerId = await wholesalerService.createCustomer(user);
+                    if (wholesalerId) {
+                        user.wholesalerCustomerId = wholesalerId;
+                        await user.save();
+                        console.log(`[SIGNUP] Linked Wholesaler ID ${wholesalerId} to user ${user._id}`);
+                    }
+                }
+            } catch (wholesalerErr) {
+                console.error('[SIGNUP] Failed to create wholesaler customer:', wholesalerErr);
+                // Don't fail the request, just log it. Admin can retry later or manual sync.
+            }
+
+            // 7. Submit Final Order to Wholesaler (Step 3)
+            // Only proceed if we have a wholesalerCustomerId and it's a mobile service (MBL/MBB)
+            if (user.wholesalerCustomerId && (type === 'MBL' || type === 'MBB') && mblSelectedNumber) {
+                (async () => {
+                    try {
+                        let planNumber = 0; // Default fallback
+                        let serviceLabel = `${user.firstName} ${user.lastName} - ${mblSelectedNumber}`;
+
+                        if (selectedPlan) {
+                            // The wholesaler plan ID (value) is sent in 'id' from the frontend
+                            planNumber = selectedPlan.id || selectedPlan.value || 0;
+
+                            // If we have a name, use it as the service label
+                            if (selectedPlan.name) {
+                                serviceLabel = selectedPlan.name;
+                            }
+                        }
+
+                        const serviceDetails = {
+                            esim: simType === 'eSim',
+                            sim_number: simType === 'physical' ? simNumber : null,
+                            plan_number: planNumber,
+                            selected_number: mblSelectedNumber,
+                            service_label: serviceLabel,
+                            esim_notification_email: esimNotificationEmail
+                        };
+
+                        await wholesalerService.submitOrder(user, user.wholesalerCustomerId, serviceDetails);
+
+                    } catch (orderErr) {
+                        console.error('[SIGNUP] Failed to submit wholesaler order:', orderErr);
+                    }
+                })();
             }
 
             return res.status(201).json({

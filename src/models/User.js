@@ -76,6 +76,9 @@ const userSchema = new mongoose.Schema(
         // Stripe integration
         stripeCustomerId: { type: String, trim: true },
 
+        // Wholesaler integration (ConnectTel)
+        wholesalerCustomerId: { type: String, trim: true },
+
         // Payment and billing preferences
         autoPayEnabled: { type: Boolean, default: false },
 

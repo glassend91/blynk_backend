@@ -13,6 +13,11 @@ const serviceSchema = new mongoose.Schema({
         enum: ['NBN', 'Business NBN', 'Mobile', 'Data Only', 'Voice Only'],
         default: 'Mobile'
     },
+    // External Plan ID for Wholesaler (ConnectTel)
+    wholesalerPlanId: {
+        type: String,
+        trim: true
+    },
 
     // Service details and specifications
     specifications: {
