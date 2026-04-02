@@ -49,7 +49,7 @@ router.get(
 // Download invoice PDF (customer-facing)
 router.get(
     '/invoices/:invoiceId/download',
-    BillingController.downloadInvoice
+    BillingController.getInvoicePDF
 );
 
 // Admin: Download invoice PDF for any customer

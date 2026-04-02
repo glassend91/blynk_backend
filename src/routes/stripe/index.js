@@ -1,12 +1,15 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const stripe = require('../../config/stripe');
+const User = require('../../models/User');
+const { authenticateToken } = require('../../middleware/auth');
 
 const router = express.Router();
 
 // Create payment intent endpoint
 router.post(
     '/create-payment-intent',
+    authenticateToken,
     [
         body('amount').isInt({ min: 50 }).withMessage('Amount must be at least 50 cents'),
         body('currency').isString().isLength({ min: 3, max: 3 }).withMessage('Currency must be a 3-letter code'),
@@ -15,27 +18,45 @@ router.post(
         try {
             const errors = validationResult(req);
             if (!errors.isEmpty()) {
-                return res.status(400).json({
-                    error: 'Validation failed',
-                    details: errors.array()
-                });
+                return res.status(400).json({ error: 'Validation failed', details: errors.array() });
             }
 
             const { amount, currency = 'aud' } = req.body;
-            console.log('amount', amount);
-            console.log('currency', currency);
+            const userId = req.user.id;
 
-            // Create payment intent
+            // 1. Find the local user
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+
+            // 2. Ensure Stripe Customer exists
+            let stripeCustomerId = user.stripeCustomerId;
+            if (!stripeCustomerId) {
+                const customer = await stripe.customers.create({
+                    email: user.email,
+                    name: `${user.firstName} ${user.lastName}`,
+                    metadata: { userId: user._id.toString() }
+                });
+                stripeCustomerId = customer.id;
+                user.stripeCustomerId = stripeCustomerId;
+                await user.save();
+                console.log(`[STRIPE] Created new customer ${stripeCustomerId} for user ${user.email}`);
+            }
+
+            // 3. Create a direct PaymentIntent
+            // Using payment_method_types: ['card'] to match the frontend Elements config
             const paymentIntent = await stripe.paymentIntents.create({
                 amount: amount,
                 currency: currency,
-                automatic_payment_methods: {
-                    enabled: true,
-                },
+                customer: stripeCustomerId,
+                payment_method_types: ['card'],
                 metadata: {
-                    // Add any additional metadata you need
-                    timestamp: new Date().toISOString(),
+                    userId: userId.toString(),
+                    type: 'signup_fee',
+                    timestamp: new Date().toISOString()
                 },
+                description: 'Service Signup Fee'
             });
 
             res.json({

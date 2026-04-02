@@ -44,29 +44,51 @@ class DashboardController {
       const subscriptions = await ServiceSubscription.find({
         userId,
         subscriptionStatus: { $in: ['active', 'pending'] }
-      }).populate('serviceId').sort({ subscribedAt: -1 }).lean();
+      }).populate('serviceId').populate('wholesalerPlanId').sort({ subscribedAt: -1 }).lean();
 
       // Map active services for UI
-      const activeServices = subscriptions.map(s => ({
-        id: s._id,
-        serviceName: s.serviceId?.serviceName || s.serviceId?.name || 'Service',
-        serviceType: s.serviceId?.serviceType || null,
-        price: s.subscriptionPrice || s.serviceId?.price || 0,
-        status: s.subscriptionStatus,
-        subscribedAt: s.subscribedAt,
-        expiresAt: s.expiresAt,
-        assignedNumber: s.assignedNumber
-      }));
+      const activeServices = subscriptions.map(s => {
+        const isWholesaler = !!s.wholesalerPlanId;
+        const target = isWholesaler ? s.wholesalerPlanId : s.serviceId;
+
+        return {
+          id: s._id,
+          serviceName: isWholesaler ? (target?.custom_name || target?.label || 'Mobile Plan') : (target?.serviceName || target?.name || 'Service'),
+          serviceType: isWholesaler ? (target?.connection_type_name || 'Mobile/Broadband') : (target?.serviceType || null),
+          price: s.subscriptionPrice || target?.price || 0,
+          status: s.subscriptionStatus,
+          subscribedAt: s.subscribedAt,
+          expiresAt: s.expiresAt,
+          assignedNumber: s.assignedNumber
+        };
+      });
 
       // Mobile usage summary (aggregate across mobile/data subscriptions)
-      const mobileSubscriptions = subscriptions.filter(s => ['Mobile', 'Data Only', 'Voice Only'].includes(s.serviceId?.serviceType));
-      const mobileUsage = mobileSubscriptions.map(s => ({
-        subscriptionId: s._id,
-        serviceName: s.serviceId?.serviceName,
-        totalUsed: s.usageData?.totalUsed || 0,
-        lastUsageUpdate: s.usageData?.lastUsageUpdate || null,
-        allowance: s.serviceId?.specifications?.dataAllowance || null
-      }));
+      const mobileSubscriptions = subscriptions.filter(s => {
+        if (s.wholesalerPlanId) return true;
+        return ['Mobile', 'Data Only', 'Voice Only'].includes(s.serviceId?.serviceType);
+      });
+
+      const mobileUsage = mobileSubscriptions.map(s => {
+        const isWholesaler = !!s.wholesalerPlanId;
+        const target = isWholesaler ? s.wholesalerPlanId : s.serviceId;
+
+        let allowance = null;
+        if (isWholesaler && target?.label) {
+          const match = target.label.match(/(\d+)GB/i);
+          if (match) allowance = match[1] + 'GB';
+        } else {
+          allowance = s.serviceId?.specifications?.dataAllowance || null;
+        }
+
+        return {
+          subscriptionId: s._id,
+          serviceName: isWholesaler ? (target?.custom_name || target?.label || 'Mobile Plan') : target?.serviceName,
+          totalUsed: s.usageData?.totalUsed || 0,
+          lastUsageUpdate: s.usageData?.lastUsageUpdate || null,
+          allowance: allowance
+        };
+      });
 
       // Upcoming bills - unpaid / sent / overdue
       const upcomingBills = await Invoice.find({

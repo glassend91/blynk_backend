@@ -38,15 +38,10 @@ const wholesalerService = {
 
             if (!token || !tenantId) {
                 console.error('[WHOLESALER] Missing credentials (token/tenantId)');
-                return null;
+                return { success: false, message: 'Missing wholesaler credentials' };
             }
 
             console.log(`[WHOLESALER] Creating customer for user: ${user.email}`);
-
-            // Prepare payload based on Individual vs Business requirements
-            // - Individual: name = null, abn_acn = null (Use billing_first_name/last_name)
-            // - Business: name = Business Name, abn_acn = ABN/ACN
-
 
             // Prepare billing address components
             let billingStreet = user.billingAddress || user.serviceAddress || '';
@@ -72,8 +67,8 @@ const wholesalerService = {
             if (!billingCountry) billingCountry = 'au';
 
             const payload = {
-                name: `${user.firstName} ${user.lastName} ${new Date().getTime()}`, // Null for Individual, Business Name for Business
-                abn_acn: 1,   // Null for Individual, ABN/ACN for Business
+                name: `${user.firstName} ${user.lastName} ${new Date().getTime()}`,
+                abn_acn: 1,
                 status: 1, // 1 = Active
                 account_manager: null,
                 billing_rule_id: 1,
@@ -85,10 +80,11 @@ const wholesalerService = {
                 billing_email: user.email,
                 billing_phone: user.phone || '03061234567',
                 billing_website: null,
-                billing_street_address: billingStreet,
+                // billing_street_address: billingStreet,
+                billing_street_address: billingStreet.replaceAll(",", " "),
                 billing_city: billingCity,
                 billing_state: billingState,
-                billing_country: 'au', // Mapping 'au' to 'Australia' for safety
+                billing_country: 'au',
                 billing_post_code: billingPostCode,
                 site_name: `${user.firstName} ${user.lastName}`,
                 notes: `Created via API Signup for ${user.email}`
@@ -111,13 +107,18 @@ const wholesalerService = {
 
             if (!customerId) {
                 console.warn('[WHOLESALER] Warning: Customer ID not found in response', response.data);
+                return { success: false, message: 'Customer created but ID not found in response', data: response.data };
             }
 
-            return customerId;
+            return { success: true, customerId };
 
         } catch (error) {
             console.error('[WHOLESALER] Failed to create customer:', error.response?.data || error.message);
-            return null;
+            return {
+                success: false,
+                error: error.response?.data || error.message,
+                message: 'Failed to create customer in wholesaler system'
+            };
         }
     },
 
@@ -321,6 +322,8 @@ const wholesalerService = {
                 }
             });
 
+            console.log('RESL ', response.data.data.bandwidths)
+
             return { success: true, data: response.data?.data || response.data };
 
         } catch (error) {
@@ -329,6 +332,252 @@ const wholesalerService = {
                 success: false,
                 error: error.response?.data || error.message,
                 message: 'Failed to perform service qualification'
+            };
+        }
+    },
+
+    /**
+     * Switch API Token Context to a Customer
+     * @param {string|number} targetTenantId - The Customer ID to switch to
+     */
+    switchToTenant: async (targetTenantId) => {
+        try {
+            const { token, tenantId } = await getCredentials();
+            if (!token) return { success: false };
+
+            console.log(`[WHOLESALER] Switching API context to tenant ${targetTenantId}...`);
+            const response = await axios.get(`${WHOLESALER_API_URL.replace('/customer', '')}/switch/to/${targetTenantId}`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'X-Tenant-Id': tenantId, // Master tenant
+                    'Accept': 'application/json'
+                }
+            });
+            console.log(`[WHOLESALER] Switch to tenant successful:`, response.data?.meta?.message);
+            return { success: true, data: response.data };
+        } catch (error) {
+            console.error('[WHOLESALER] Failed to switch tenant:', error.response?.data || error.message);
+            return { success: false, error: error.message };
+        }
+    },
+
+    /**
+     * Switch API Token Context back to the Master Tenant
+     * @param {string|number} currentTenantId - The Customer ID currently active
+     */
+    switchBack: async (currentTenantId) => {
+        try {
+            const { token } = await getCredentials();
+            if (!token) return { success: false };
+
+            console.log(`[WHOLESALER] Switching API context back from tenant ${currentTenantId}...`);
+            const response = await axios.get(`${WHOLESALER_API_URL.replace('/customer', '')}/switch/back`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'X-Tenant-Id': currentTenantId, // Current active tenant
+                    'Accept': 'application/json'
+                }
+            });
+            console.log(`[WHOLESALER] Switch back successful:`, response.data?.meta?.message);
+            return { success: true, data: response.data };
+        } catch (error) {
+            console.error('[WHOLESALER] Failed to switch back:', error.response?.data || error.message);
+            return { success: false, error: error.message };
+        }
+    },
+
+    /**
+     * Create a site for a customer (required for NBN orders)
+     * @param {string|number} customerId - The wholesaler customer ID (used as tenant ID)
+     * @param {Object} user - The local user object
+     * @returns {Promise<number|null>} - The created site ID
+     */
+    createSite: async (customerId, user) => {
+        try {
+            const { token } = await getCredentials();
+
+            if (!token) {
+                console.error('[WHOLESALER] Missing token for createSite');
+                return { success: false, message: 'Missing wholesaler token' };
+            }
+
+            console.log(`[WHOLESALER] Creating site for customer ${customerId}...`);
+
+            // Extract address components (assuming addressInformation is available or using fallbacks)
+            let unitNum = '';
+            let streetNum = '';
+            let streetName = '';
+            let city = 'Canberra';
+            let state = 'ACT';
+            let postCode = '2600';
+            let country = 'AU';
+
+            if (user.addressInformation) {
+                // Attempt to heuristically split street address into parts if possible, otherwise use whole string
+                const streetParts = (user.addressInformation.streetAddress || user.serviceAddress || '').split(' ');
+                if (streetParts.length > 0) {
+                    streetNum = streetParts[0];
+                    streetName = streetParts.slice(1).join(' ');
+                }
+                city = user.addressInformation.city || city;
+                state = user.addressInformation.state || state;
+                postCode = user.addressInformation.postcode || postCode;
+                country = (user.addressInformation.country || country).toUpperCase();
+            } else {
+                // simple fallback if structure doesn't exist
+                const parts = (user.serviceAddress || '').split(',');
+                if (parts.length > 0) streetName = parts[0].trim();
+            }
+
+            const payload = {
+                name: `${user.firstName} ${user.lastName}`,
+                phone: user.phone || '0000000000',
+                unit_number: unitNum,
+                street_number: streetNum || '1', // default fallback
+                street_name: streetName.replaceAll(",", " ") || 'Unknown Street', // default fallback
+                post_code: parseInt(postCode, 10) || 2600,
+                city: city,
+                state: state,
+                country: country
+            };
+
+            console.log(customerId, 'SITE CREATE PAYLOAD: ', payload)
+
+            const response = await axios.post(`${WHOLESALER_API_URL}/sites`, payload, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'X-Tenant-Id': Number(customerId), // Use customer ID as tenant ID for this call
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+            });
+
+            const siteId = response.data?.data?.site?.id;
+            if (!siteId) {
+                return { success: false, message: 'Site created but ID not found in response', data: response.data };
+            }
+
+            console.log(customerId, '[WHOLESALER] Site created successfully:', siteId);
+            return { success: true, siteId };
+
+        } catch (error) {
+            console.error(customerId, '[WHOLESALER] Failed to create site:', error.response?.data || error.message);
+            return {
+                success: false,
+                error: error.response?.data || error.message,
+                message: 'Failed to create site in wholesaler system'
+            };
+        }
+    },
+
+    /**
+     * Create a technical contact for a customer (required for NBN orders)
+     * @param {string|number} customerId - The wholesaler customer ID (used as tenant ID)
+     * @param {Object} user - The local user object
+     * @returns {Promise<number|null>} - The created contact ID
+     */
+    createContact: async (customerId, user) => {
+        try {
+            const { token } = await getCredentials();
+
+            if (!token) {
+                console.error('[WHOLESALER] Missing token for createContact');
+                return { success: false, message: 'Missing wholesaler token' };
+            }
+
+            console.log(`[WHOLESALER] Creating contact for customer ${customerId}...`);
+
+            // Ensure we use the exact structure from the user
+            const payload = {
+                type: "18",
+                description: "Main Tech Contact",
+                first_name: user.firstName || 'Unknown',
+                last_name: user.lastName || 'Unknown',
+                email: user.email,
+                mobile: user.phone || '0000000000'
+            };
+
+            console.log('CONTACT CREATE PAYLOAD: ', payload)
+
+            const response = await axios.post(`${WHOLESALER_API_URL}/contacts`, payload, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'X-Tenant-Id': Number(customerId), // Use customer ID as tenant ID for this call
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+            });
+
+            const contactId = response.data?.data?.contact?.id;
+            if (!contactId) {
+                return { success: false, message: 'Contact created but ID not found in response', data: response.data };
+            }
+
+            console.log('[WHOLESALER] Contact created successfully:', contactId);
+            return { success: true, contactId };
+
+        } catch (error) {
+            console.error('[WHOLESALER] Failed to create contact:', error.response?.data || error.message);
+            return {
+                success: false,
+                error: error.response?.data || error.message,
+                message: 'Failed to create contact in wholesaler system'
+            };
+        }
+    },
+
+    /**
+     * Submit an NBN order to the wholesaler (ConnectTel)
+     * @param {Object} payload - The order details
+     * @returns {Promise<Object>} - The API response
+     */
+    submitNbnOrder: async (payload) => {
+        try {
+            const { token, tenantId } = await getCredentials();
+
+            if (!token || !tenantId) {
+                console.error('[WHOLESALER] Missing credentials (token/tenantId)');
+                return { success: false, message: 'Missing wholesaler credentials' };
+            }
+
+            console.log(`[WHOLESALER] Submitting NBN order for customer ${payload.customer_id}...`);
+
+            const orderPayload = {
+                loc_id: payload.loc_id,
+                customer_id: parseInt(payload.customer_id, 10),
+                site_id: parseInt(payload.site_id, 10),
+                contact_id: parseInt(payload.contact_id, 10),
+                fiber_uplift: false,
+                bandwidth_id: `id_${payload.bandwidth_id}`,
+                sla: 14,
+                static_ip: !!payload.static_ip,
+                ipv6_disabled: false,
+                contact_phone_type: "mobile",
+                service_ref: payload.service_ref || `AVC889585262716`, // Use extracted AVC for churns, fallback to placeholder
+                line: payload.line || "NEW",
+                port: payload.port || ""
+            };
+
+            console.log('[WHOLESALER] NBN ORDER PAYLOAD: ', orderPayload)
+
+            const response = await axios.post(`${WHOLESALER_API_URL.replace('/customer', '')}/nbn/orders`, orderPayload, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'X-Tenant-Id': tenantId, // Master tenant ID
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+            });
+
+            console.log('[WHOLESALER] NBN Order submitted successfully. Response:', response.data);
+            return { success: true, data: response.data };
+
+        } catch (error) {
+            console.error('[WHOLESALER] Failed to submit NBN order:', error.response?.data || error.message);
+            return {
+                success: false,
+                error: error.response?.data || error.message,
+                message: 'Failed to submit NBN order to wholesaler'
             };
         }
     }

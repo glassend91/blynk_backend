@@ -3,63 +3,83 @@ const BillingAccount = require('../models/BillingAccount');
 const User = require('../models/User');
 const ServiceSubscription = require('../models/ServiceSubscription');
 const InvoiceService = require('../services/invoiceService');
+const stripe = require('../config/stripe');
 const { generateInvoicePDF, generateInvoiceFilename } = require('../utils/pdfGenerator');
 
 class BillingController {
     // Get billing summary for dashboard
     static async getBillingSummary(req, res, next) {
         try {
-            const userId = req.user.id
-            // Get billing account or create one if it doesn't exist
-            let billingAccount = await BillingAccount.findOne({ customerId: userId });
-            if (!billingAccount) {
-                // Auto-create billing account for new users
-                billingAccount = new BillingAccount({
-                    customerId: userId,
-                    billingCycle: 'monthly',
-                    creditLimit: 0,
-                    nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days from now
-                });
-                billingAccount.calculateNextBillingDate();
-                await billingAccount.save();
+            const userId = req.user.id;
+            const user = await User.findById(userId);
+
+            if (!user) {
+                return res.status(404).json({ success: false, message: 'User not found' });
             }
 
-            // Get recent invoices
-            const recentInvoices = await Invoice.find({ customerId: userId })
-                .sort({ createdAt: -1 })
-                .limit(5)
-                .select('invoiceNumber status total dueDate createdAt');
+            // If no Stripe customer ID, return empty/default summary
+            if (!user.stripeCustomerId) {
+                return res.json({
+                    success: true,
+                    data: {
+                        currentBalance: 0,
+                        nextBillingDate: new Date().toISOString(),
+                        monthlyAmount: 0,
+                        recentInvoices: [],
+                        billingAccount: {
+                            status: 'active',
+                            autoPayEnabled: user.autoPayEnabled || false,
+                            creditLimit: 0
+                        }
+                    }
+                });
+            }
 
-            // Get current month charges (this would typically come from subscriptions)
-            const currentMonth = new Date();
-            currentMonth.setDate(1);
-            const nextMonth = new Date(currentMonth);
-            nextMonth.setMonth(nextMonth.getMonth() + 1);
+            // Fetch Stripe customer details for balance
+            const customer = await stripe.customers.retrieve(user.stripeCustomerId);
 
-            const currentMonthInvoices = await Invoice.find({
-                customerId: userId,
-                billingPeriod: {
-                    $gte: currentMonth,
-                    $lt: nextMonth
-                }
-            });
+            // Fetch recent invoices and standalone charges from Stripe
+            const [stripeInvoices, stripeCharges] = await Promise.all([
+                stripe.invoices.list({ customer: user.stripeCustomerId, limit: 10 }),
+                stripe.charges.list({ customer: user.stripeCustomerId, limit: 10 })
+            ]);
 
-            const currentMonthTotal = currentMonthInvoices.reduce((sum, invoice) => sum + invoice.total, 0);
-
-            // Calculate next billing date
-            const nextBillingDate = billingAccount.nextBillingDate;
+            // Map and merge both into a unified "Invoice" format for the dashboard
+            const recentInvoices = [
+                ...stripeInvoices.data.map(inv => ({
+                    id: inv.id,
+                    invoiceNumber: inv.number,
+                    status: inv.status === 'open' ? 'sent' : inv.status,
+                    total: inv.total / 100,
+                    createdAt: new Date(inv.created * 1000).toISOString(),
+                    type: 'invoice'
+                })),
+                ...stripeCharges.data
+                    .filter(charge => !charge.invoice)
+                    .map(charge => ({
+                        id: charge.id,
+                        invoiceNumber: `PMT-${charge.id.slice(-6).toUpperCase()}`,
+                        status: charge.status === 'succeeded' ? 'paid' : (charge.status === 'pending' ? 'sent' : 'overdue'),
+                        total: charge.amount / 100,
+                        createdAt: new Date(charge.created * 1000).toISOString(),
+                        type: 'payment',
+                        description: charge.description || 'Signup Fee'
+                    }))
+            ]
+                .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+                .slice(0, 5);
 
             res.json({
                 success: true,
                 data: {
-                    currentBalance: billingAccount.currentBalance,
-                    nextBillingDate: nextBillingDate,
-                    monthlyAmount: currentMonthTotal,
+                    currentBalance: (customer.balance || 0) / 100,
+                    nextBillingDate: new Date().toISOString(), // Mock
+                    monthlyAmount: 0, // Mock
                     recentInvoices: recentInvoices,
                     billingAccount: {
-                        status: billingAccount.status,
-                        autoPayEnabled: billingAccount.autoPayEnabled,
-                        creditLimit: billingAccount.creditLimit
+                        status: user.status || 'Active',
+                        autoPayEnabled: user.autoPayEnabled || false,
+                        creditLimit: 0
                     }
                 }
             });
@@ -72,50 +92,64 @@ class BillingController {
     static async getInvoices(req, res, next) {
         try {
             const userId = req.user.id;
-            const { page = 1, limit = 10, status, year, month } = req.query;
+            const user = await User.findById(userId);
 
-            const skip = (page - 1) * limit;
-            const filter = { customerId: userId };
-
-            // Add status filter
-            if (status) {
-                filter.status = status;
+            if (!user || !user.stripeCustomerId) {
+                return res.json({ success: true, data: { invoices: [], pagination: { currentPage: 1, totalPages: 0, totalItems: 0, itemsPerPage: 10 } } });
             }
 
-            // Add date filters
-            if (year || month) {
-                const startDate = new Date();
-                const endDate = new Date();
+            const { page = 1, limit = 10, status } = req.query;
 
-                if (year) {
-                    startDate.setFullYear(parseInt(year));
-                    endDate.setFullYear(parseInt(year) + 1);
-                }
+            // Fetch both invoices and standalone charges for full history
+            const [stripeInvoices, stripeCharges] = await Promise.all([
+                stripe.invoices.list({ customer: user.stripeCustomerId, limit: parseInt(limit) }),
+                stripe.charges.list({ customer: user.stripeCustomerId, limit: 100 })
+            ]);
 
-                if (month) {
-                    startDate.setMonth(parseInt(month) - 1);
-                    endDate.setMonth(parseInt(month));
-                }
+            const mappedInvoices = stripeInvoices.data.map(inv => ({
+                id: inv.id,
+                invoiceNumber: inv.number,
+                status: inv.status === 'open' ? 'sent' : inv.status,
+                total: inv.total / 100,
+                dueDate: new Date(inv.due_date * 1000 || inv.created * 1000).toISOString(),
+                createdAt: new Date(inv.created * 1000).toISOString(),
+                billingPeriod: {
+                    startDate: new Date(inv.period_start * 1000).toISOString(),
+                    endDate: new Date(inv.period_end * 1000).toISOString()
+                },
+                lineItems: inv.lines.data.map(line => ({
+                    description: line.description,
+                    amount: line.amount / 100
+                })),
+                type: 'invoice',
+                receiptUrl: inv.hosted_invoice_url
+            }));
 
-                filter.createdAt = { $gte: startDate, $lt: endDate };
-            }
+            const mappedCharges = stripeCharges.data
+                .filter(charge => !charge.invoice)
+                .map(charge => ({
+                    id: charge.id,
+                    invoiceNumber: `PMT-${charge.id.slice(-6).toUpperCase()}`,
+                    status: charge.status === 'succeeded' ? 'paid' : (charge.status === 'pending' ? 'sent' : 'overdue'),
+                    total: charge.amount / 100,
+                    dueDate: new Date(charge.created * 1000).toISOString(),
+                    createdAt: new Date(charge.created * 1000).toISOString(),
+                    type: 'payment',
+                    receiptUrl: charge.receipt_url,
+                    lineItems: [{ description: charge.description || 'Signup Fee', amount: charge.amount / 100 }]
+                }));
 
-            const invoices = await Invoice.find(filter)
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(parseInt(limit))
-                .populate('paymentMethod', 'type last4');
-
-            const total = await Invoice.countDocuments(filter);
+            const allInvoices = [...mappedInvoices, ...mappedCharges]
+                .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
             res.json({
                 success: true,
                 data: {
-                    invoices,
+                    invoices: allInvoices,
                     pagination: {
                         currentPage: parseInt(page),
-                        totalPages: Math.ceil(total / limit),
-                        totalItems: total,
+                        totalPages: Math.ceil(allInvoices.length / limit),
+                        totalItems: allInvoices.length,
                         itemsPerPage: parseInt(limit)
                     }
                 }
@@ -131,22 +165,27 @@ class BillingController {
             const { invoiceId } = req.params;
             const userId = req.user.id;
 
+            // Handle Stripe IDs (Invoices or Charges)
+            if (invoiceId.startsWith('in_') || invoiceId.startsWith('ch_')) {
+                let data;
+                if (invoiceId.startsWith('in_')) {
+                    data = await stripe.invoices.retrieve(invoiceId);
+                } else {
+                    data = await stripe.charges.retrieve(invoiceId);
+                }
+                return res.json({ success: true, data });
+            }
+
             const invoice = await Invoice.findOne({
                 _id: invoiceId,
                 customerId: userId
             }).populate('paymentMethod', 'type last4');
 
             if (!invoice) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Invoice not found'
-                });
+                return res.status(404).json({ success: false, message: 'Invoice not found' });
             }
 
-            res.json({
-                success: true,
-                data: invoice
-            });
+            res.json({ success: true, data: invoice });
         } catch (error) {
             next(error);
         }
@@ -221,11 +260,24 @@ class BillingController {
         }
     }
 
-    // Download invoice PDF (customer-facing)
-    static async downloadInvoice(req, res, next) {
+    // Generate and download invoice PDF
+    static async getInvoicePDF(req, res, next) {
         try {
             const { invoiceId } = req.params;
             const userId = req.user.id;
+
+            // Handle Stripe IDs directly by returning their hosted URLs
+            if (invoiceId.startsWith('in_') || invoiceId.startsWith('ch_')) {
+                let downloadUrl;
+                if (invoiceId.startsWith('in_')) {
+                    const stripeInvoice = await stripe.invoices.retrieve(invoiceId);
+                    downloadUrl = stripeInvoice.invoice_pdf;
+                } else {
+                    const stripeCharge = await stripe.charges.retrieve(invoiceId);
+                    downloadUrl = stripeCharge.receipt_url;
+                }
+                return res.json({ success: true, data: { downloadUrl } });
+            }
 
             const invoice = await Invoice.findOne({
                 _id: invoiceId,
@@ -233,29 +285,18 @@ class BillingController {
             }).populate('customerId', 'firstName lastName email phone billingAddress serviceAddress businessDetails');
 
             if (!invoice) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Invoice not found'
-                });
+                return res.status(404).json({ success: false, message: 'Invoice not found' });
             }
 
             const customer = invoice.customerId || await User.findById(userId);
-            if (!customer) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Customer not found'
-                });
-            }
 
-            // Generate PDF
+            // Generate PDF locally for non-Stripe invoices
             const pdfBuffer = await generateInvoicePDF(invoice, customer);
             const filename = generateInvoiceFilename(invoice, customer);
 
-            // Set response headers for PDF download
             res.setHeader('Content-Type', 'application/pdf');
             res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
             res.setHeader('Content-Length', pdfBuffer.length);
-
             res.send(pdfBuffer);
         } catch (error) {
             console.error('Error generating invoice PDF:', error);

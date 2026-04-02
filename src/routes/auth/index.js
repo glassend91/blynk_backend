@@ -17,6 +17,7 @@ const router = express.Router();
 
 // Shared auth middleware for protected admin endpoints
 const { authenticateToken, requireAdmin } = require('../../middleware/auth');
+const { default: mongoose } = require('mongoose');
 
 const JWT_EXPIRES_IN = '7d';
 const OTP_EXPIRY_MINUTES = 10;
@@ -141,6 +142,11 @@ router.post(
                 esimNotificationEmail,
                 selectedPlan,
                 customerType,
+                locId, // Added NBN locId parameter
+                ntdId, // Added NBN line/NTD ID parameter
+                port, // Added NBN port parameter
+                serviceRef, // Added NBN service_ref parameter
+                wantsStaticIp, // Added NBN static_ip flag
             } = req.body;
 
             console.log('body', req.body);
@@ -243,6 +249,7 @@ router.post(
                 passwordHash,
                 customerType: finalCustomerType,
                 otpVerified: false,
+                status: 'Pending'
             });
 
             const token = createToken(user.id);
@@ -251,17 +258,36 @@ router.post(
             (async () => {
                 try {
                     let serviceToSubscribe = null;
+                    let wholesalerPlanToSubscribe = null;
+
                     // Prefer explicit selectedPlan id from request
                     if (selectedPlan && (selectedPlan.id || selectedPlan._id)) {
-                        try {
-                            serviceToSubscribe = await Service.findById(selectedPlan.id || selectedPlan._id);
-                        } catch (e) {
-                            // ignore and fallback to default
+                        const planIdOrValue = selectedPlan.id || selectedPlan._id;
+
+                        // If MBL or MBB, lookup WholesalerPlan instead of Service
+                        if (type === 'MBL' || type === 'MBB') {
+                            try {
+                                const WholesalerPlan = require('../../models/WholesalerPlan');
+                                wholesalerPlanToSubscribe = await WholesalerPlan.findOne({
+                                    $or: [
+                                        { value: isNaN(planIdOrValue) ? null : Number(planIdOrValue) },
+                                        mongoose.isValidObjectId(planIdOrValue) ? { _id: planIdOrValue } : null
+                                    ].filter(Boolean)
+                                });
+                            } catch (e) {
+                                console.error('Error finding WholesalerPlan:', e);
+                            }
+                        } else {
+                            try {
+                                serviceToSubscribe = await Service.findById(planIdOrValue);
+                            } catch (e) {
+                                // ignore and fallback to default
+                            }
                         }
                     }
 
                     // Fallback: find a default service by signup type
-                    if (!serviceToSubscribe) {
+                    if (!serviceToSubscribe && !wholesalerPlanToSubscribe) {
                         const TYPE_TO_SERVICE_TYPE = {
                             NBN: 'NBN',
                             MBL: 'Mobile',
@@ -278,17 +304,18 @@ router.post(
                         }
                     }
 
-                    if (serviceToSubscribe) {
-                        const subscriptionPrice = serviceToSubscribe.price || (selectedPlan && selectedPlan.price) || 0;
+                    if (serviceToSubscribe || wholesalerPlanToSubscribe) {
+                        const subscriptionPrice = serviceToSubscribe ? serviceToSubscribe.price : (wholesalerPlanToSubscribe ? wholesalerPlanToSubscribe.price : ((selectedPlan && selectedPlan.price) || 0));
                         await ServiceSubscription.create({
-                            serviceId: serviceToSubscribe._id,
+                            serviceId: serviceToSubscribe ? serviceToSubscribe._id : undefined,
+                            wholesalerPlanId: wholesalerPlanToSubscribe ? wholesalerPlanToSubscribe._id : undefined,
                             userId: user._id,
                             subscriptionStatus: 'active',
                             subscribedAt: new Date(),
                             activatedAt: new Date(),
                             subscriptionPrice,
-                            currency: serviceToSubscribe.currency || 'AUD',
-                            billingCycle: serviceToSubscribe.billingCycle || 'monthly'
+                            currency: serviceToSubscribe ? (serviceToSubscribe.currency || 'AUD') : 'AUD',
+                            billingCycle: serviceToSubscribe ? (serviceToSubscribe.billingCycle || 'monthly') : 'monthly'
                         });
                     }
                 } catch (subErr) {
@@ -357,55 +384,98 @@ router.post(
                 }
             }
 
-            // 6. Create Customer in Wholesaler System (Step 2)
+            // 6. Wholesaler Orchestration (Step 2 & 3)
+            // We make this blocking and atomic to ensure consistency
             try {
-                // Only create wholesaler account if user creation was successful
                 if (user && user._id) {
-                    const wholesalerId = await wholesalerService.createCustomer(user);
-                    if (wholesalerId) {
-                        user.wholesalerCustomerId = wholesalerId;
-                        await user.save();
-                        console.log(`[SIGNUP] Linked Wholesaler ID ${wholesalerId} to user ${user._id}`);
-                    }
-                }
-            } catch (wholesalerErr) {
-                console.error('[SIGNUP] Failed to create wholesaler customer:', wholesalerErr);
-                // Don't fail the request, just log it. Admin can retry later or manual sync.
-            }
+                    console.log(`[SIGNUP] Integrating with Wholesaler for user ${user.email} (Type: ${type})`);
 
-            // 7. Submit Final Order to Wholesaler (Step 3)
-            // Only proceed if we have a wholesalerCustomerId and it's a mobile service (MBL/MBB)
-            if (user.wholesalerCustomerId && (type === 'MBL' || type === 'MBB') && mblSelectedNumber) {
-                (async () => {
-                    try {
-                        let planNumber = 0; // Default fallback
+                    // A. Create Customer
+                    const customerResult = await wholesalerService.createCustomer(user);
+                    if (!customerResult.success) {
+                        throw new Error(`Wholesaler Customer Creation Failed: ${customerResult.message}`);
+                    }
+
+                    user.wholesalerCustomerId = customerResult.customerId;
+                    await user.save();
+                    console.log(`[SIGNUP] Linked Wholesaler ID ${customerResult.customerId} to user ${user._id}`);
+
+                    // B. Submit Final Order (Blocking for NBN, optional for MBL/MBB but making all blocking for reliability)
+                    if ((type === 'MBL' || type === 'MBB')) {
+                        let planNumber = 0;
                         let serviceLabel = `${user.firstName} ${user.lastName} - ${mblSelectedNumber}`;
 
                         if (selectedPlan) {
-                            // The wholesaler plan ID (value) is sent in 'id' from the frontend
                             planNumber = selectedPlan.id || selectedPlan.value || 0;
-
-                            // If we have a name, use it as the service label
-                            if (selectedPlan.name) {
-                                serviceLabel = selectedPlan.name;
-                            }
+                            if (selectedPlan.name) serviceLabel = selectedPlan.name;
                         }
 
                         const serviceDetails = {
                             esim: simType === 'eSim',
                             sim_number: simType === 'physical' ? simNumber : null,
                             plan_number: planNumber,
-                            selected_number: mblSelectedNumber,
+                            selected_number: mblSelectedNumber || phone,
                             service_label: serviceLabel,
                             esim_notification_email: esimNotificationEmail
                         };
 
-                        await wholesalerService.submitOrder(user, user.wholesalerCustomerId, serviceDetails);
+                        const orderResult = await wholesalerService.submitOrder(user, user.wholesalerCustomerId, serviceDetails);
+                        if (!orderResult.success) {
+                            throw new Error(`MBL/MBB Order Submission Failed: ${orderResult.message || 'Unknown error'}`);
+                        }
+                    } else if (type === 'NBN' && locId && selectedPlan && selectedPlan.id) {
+                        console.log(`[SIGNUP] Commencing NBN Order orchestration for ${user.email}...`);
 
-                    } catch (orderErr) {
-                        console.error('[SIGNUP] Failed to submit wholesaler order:', orderErr);
+                        // Switch context to customer
+                        await wholesalerService.switchToTenant(user.wholesalerCustomerId);
+
+                        try {
+                            // 1. Create Site
+                            const siteResult = await wholesalerService.createSite(user.wholesalerCustomerId, user);
+                            if (!siteResult.success) throw new Error(`NBN Site Creation Failed: ${siteResult.message}`);
+
+                            // 2. Create Contact
+                            const contactResult = await wholesalerService.createContact(user.wholesalerCustomerId, user);
+                            if (!contactResult.success) throw new Error(`NBN Contact Creation Failed: ${contactResult.message}`);
+
+                            // 3. Submit NBN Order
+                            const nbnOrderPayload = {
+                                loc_id: locId,
+                                customer_id: user.wholesalerCustomerId,
+                                site_id: siteResult.siteId,
+                                contact_id: contactResult.contactId,
+                                bandwidth_id: selectedPlan.id,
+                                line: ntdId || "NEW",
+                                port: port || "",
+                                service_ref: serviceRef || "",
+                                static_ip: !!wantsStaticIp
+                            };
+
+                            const orderResult = await wholesalerService.submitNbnOrder(nbnOrderPayload);
+                            if (!orderResult.success) {
+                                throw new Error(`NBN Order Submission Failed: ${orderResult.message}`);
+                            }
+
+                            console.log('[SIGNUP] NBN Order submitted successfully!');
+                        } finally {
+                            // Switch context back to master (always)
+                            await wholesalerService.switchBack(user.wholesalerCustomerId);
+                        }
                     }
-                })();
+                }
+            } catch (wholesalerErr) {
+                console.error('[SIGNUP] Wholesaler integration error:', wholesalerErr.message);
+
+                // CLEANUP: Delete the local user if any wholesaler step fails
+                if (user && user._id) {
+                    console.warn(`[SIGNUP] Rolling back: Deleting local user ${user._id} due to wholesaler failure.`);
+                    await User.findByIdAndDelete(user._id);
+                }
+
+                return res.status(400).json({
+                    success: false,
+                    message: wholesalerErr.message || 'Failed to complete wholesaler provisioning. Signup rolled back.'
+                });
             }
 
             return res.status(201).json({
@@ -727,6 +797,16 @@ router.post(
                 return res.status(401).json({ message: 'Invalid email or password' });
             }
 
+            // ONLY handle 'Pending' check for customer role
+            // Admins should always be able to log in even if pending (e.g. initial setup)
+            if (user.role === 'customer' && user.status === 'Pending') {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Your account is pending activation. Please complete your signup payment to log in.',
+                    status: 'Pending'
+                });
+            }
+
             // Compute effective permissions based on role/subrole
             let permissions = {};
             try {
@@ -755,6 +835,55 @@ router.post(
             });
         } catch (err) {
             next(err);
+        }
+    }
+);
+
+// Activate account after successful payment
+router.post(
+    '/activate-account',
+    [
+        body('paymentIntentId').isString().notEmpty().withMessage('Payment Intent ID is required'),
+    ],
+    authenticateToken,
+    async (req, res, next) => {
+        try {
+            const { paymentIntentId } = req.body;
+            const userId = req.user.id;
+
+            // 1. Retrieve the PaymentIntent from Stripe
+            const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+            if (paymentIntent.status !== 'succeeded') {
+                return res.status(400).json({
+                    success: false,
+                    message: `Payment not completed. Current status: ${paymentIntent.status}`
+                });
+            }
+
+            // 2. Find and activate the user
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ success: false, message: 'User not found' });
+            }
+
+            user.status = 'Active';
+            await user.save();
+
+            console.log(`[AUTH] User ${user.email} activated successfully after payment ${paymentIntentId}`);
+
+            res.json({
+                success: true,
+                message: 'Account activated successfully. Welcome!',
+                user: user.toSafeJSON()
+            });
+
+        } catch (err) {
+            console.error('[AUTH] Activation failed:', err);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to activate account. Please contact support.'
+            });
         }
     }
 );

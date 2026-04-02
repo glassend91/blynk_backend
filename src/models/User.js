@@ -91,7 +91,7 @@ const userSchema = new mongoose.Schema(
         billingNotifications: { type: Boolean, default: true },
 
         // Admin UI status (Active / Inactive / Pending)
-        status: { type: String, enum: ['Active', 'Inactive', 'Pending'], default: 'Active' },
+        status: { type: String, enum: ['Active', 'Inactive', 'Pending'], default: 'Pending' },
 
         // Soft delete flag for admin operations
         isDeleted: { type: Boolean, default: false },

@@ -662,6 +662,7 @@ class ServiceController {
             const subscriptions = await ServiceSubscription.find(query)
                 .populate([
                     { path: 'serviceId' },
+                    { path: 'wholesalerPlanId' },
                     { path: 'paymentMethodId' }
                 ])
                 .sort({ subscribedAt: -1 });

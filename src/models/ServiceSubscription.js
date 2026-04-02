@@ -5,7 +5,12 @@ const serviceSubscriptionSchema = new mongoose.Schema({
     serviceId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Service',
-        required: true
+        required: false
+    },
+    wholesalerPlanId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'WholesalerPlan',
+        required: false
     },
     userId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -331,6 +336,7 @@ serviceSubscriptionSchema.statics.getActiveForUser = function (userId) {
         subscriptionStatus: { $in: ['active', 'pending'] }
     }).populate([
         { path: 'serviceId' },
+        { path: 'wholesalerPlanId' },
         { path: 'paymentMethodId' }
     ]);
 };
@@ -339,6 +345,7 @@ serviceSubscriptionSchema.statics.getActiveForUser = function (userId) {
 serviceSubscriptionSchema.statics.getAllForUser = function (userId) {
     return this.find({ userId }).populate([
         { path: 'serviceId' },
+        { path: 'wholesalerPlanId' },
         { path: 'paymentMethodId' }
     ]);
 };
