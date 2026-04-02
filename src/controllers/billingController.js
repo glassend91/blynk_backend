@@ -1,6 +1,7 @@
 const Invoice = require('../models/Invoice');
 const BillingAccount = require('../models/BillingAccount');
 const User = require('../models/User');
+const PaymentMethod = require('../models/PaymentMethod');
 const ServiceSubscription = require('../models/ServiceSubscription');
 const InvoiceService = require('../services/invoiceService');
 const stripe = require('../config/stripe');
@@ -814,6 +815,166 @@ class BillingController {
             });
         } catch (error) {
             next(error);
+        }
+    }
+
+    // Admin: Process manual charge for a customer
+    static async processAdminManualCharge(req, res, next) {
+        try {
+            const { customerId } = req.params;
+            const { amount, description } = req.body;
+
+            if (!amount || amount <= 0) {
+                return res.status(400).json({ success: false, message: 'Invalid amount' });
+            }
+
+            if (!description) {
+                return res.status(400).json({ success: false, message: 'Description is required' });
+            }
+
+            const customer = await User.findById(customerId);
+            if (!customer) {
+                return res.status(404).json({ success: false, message: 'Customer not found' });
+            }
+
+            if (!customer.stripeCustomerId) {
+                return res.status(400).json({ success: false, message: 'Customer has no Stripe profile' });
+            }
+
+            // Find default payment method
+            const defaultMethod = await PaymentMethod.getDefaultForUser(customerId);
+            if (!defaultMethod) {
+                return res.status(400).json({ success: false, message: 'No default payment method found for this customer' });
+            }
+
+            // Create and confirm Payment Intent
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: Math.round(amount * 100), // Convert to cents
+                currency: 'aud',
+                customer: customer.stripeCustomerId,
+                payment_method: defaultMethod.stripePaymentMethodId,
+                off_session: true,
+                confirm: true,
+                description: description,
+                metadata: {
+                    userId: customerId.toString(),
+                    adminId: req.user.id.toString(),
+                    type: 'manual_charge'
+                }
+            });
+
+            if (paymentIntent.status !== 'succeeded') {
+                return res.status(400).json({
+                    success: false,
+                    message: `Payment failed with status: ${paymentIntent.status}`,
+                    details: paymentIntent.last_payment_error?.message || 'Transaction could not be completed'
+                });
+            }
+
+            // Create local invoice record
+            const invoiceNumber = await Invoice.generateInvoiceNumber();
+            const invoice = await Invoice.create({
+                invoiceNumber: invoiceNumber,
+                customerId: customerId,
+                billingPeriod: {
+                    startDate: new Date(),
+                    endDate: new Date()
+                },
+                lineItems: [{
+                    description: description,
+                    quantity: 1,
+                    unitPrice: amount,
+                    amount: amount
+                }],
+                subtotal: amount,
+                total: amount,
+                status: 'paid',
+                dueDate: new Date(),
+                paymentMethod: defaultMethod._id,
+                paymentDate: new Date(),
+                paymentReference: paymentIntent.id,
+                notes: `Manual charge processed by admin: ${description}`
+            });
+
+            res.json({
+                success: true,
+                message: 'Manual charge processed successfully',
+                data: {
+                    transactionId: paymentIntent.id,
+                    invoiceId: invoice._id,
+                    amount: amount
+                }
+            });
+
+        } catch (error) {
+            console.error('[ADMIN_CHARGE] Manual charge failed:', error);
+            res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to process manual charge'
+            });
+        }
+    }
+
+    // Admin: Process refund for an invoice
+    static async processAdminRefund(req, res, next) {
+        try {
+            const { invoiceId } = req.params;
+            const { amount, reason } = req.body;
+
+            const invoice = await Invoice.findById(invoiceId);
+            if (!invoice) {
+                return res.status(404).json({ success: false, message: 'Invoice not found' });
+            }
+
+            if (invoice.status !== 'paid') {
+                return res.status(400).json({ success: false, message: 'Only paid invoices can be refunded' });
+            }
+
+            if (!invoice.paymentReference) {
+                return res.status(400).json({ success: false, message: 'No payment reference found for this invoice' });
+            }
+
+            // Create refund in Stripe
+            const refundData = {
+                payment_intent: invoice.paymentReference,
+                metadata: {
+                    invoiceId: invoice._id.toString(),
+                    adminId: req.user.id.toString(),
+                    reason: reason || 'Admin initiated refund'
+                }
+            };
+
+            // If partial refund
+            if (amount && amount > 0) {
+                if (amount > invoice.total) {
+                    return res.status(400).json({ success: false, message: 'Refund amount exceeds invoice total' });
+                }
+                refundData.amount = Math.round(amount * 100);
+            }
+
+            const refund = await stripe.refunds.create(refundData);
+
+            // Update local invoice
+            invoice.status = 'refunded';
+            invoice.notes = `${invoice.notes || ''}\n[REFUND] Processed by admin. Stripe Refund ID: ${refund.id}. Reason: ${reason || 'N/A'}`;
+            await invoice.save();
+
+            res.json({
+                success: true,
+                message: 'Refund processed successfully',
+                data: {
+                    refundId: refund.id,
+                    amount: refund.amount / 100,
+                    status: invoice.status
+                }
+            });
+
+        } catch (error) {
+            console.error('[ADMIN_REFUND] Refund failed:', error);
+            res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to process refund'
+            });
         }
     }
 }
