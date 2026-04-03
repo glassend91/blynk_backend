@@ -1,5 +1,11 @@
 const transporter = require('../config/email');
-const { getOTPEmailTemplate, getOrderConfirmationTemplate, getCustomerVerificationOTPTemplate } = require('./emailTemplates');
+const {
+    getOTPEmailTemplate,
+    getOrderConfirmationTemplate,
+    getCustomerVerificationOTPTemplate,
+    getManualChargeTemplate,
+    getRefundTemplate
+} = require('./emailTemplates');
 
 /**
  * Send OTP email to user
@@ -199,11 +205,64 @@ async function sendCustomerVerificationOTPEmail(email, otp, name = 'Customer') {
     }
 }
 
+/**
+ * Send manual charge notification email
+ * @param {string} email - Recipient email address
+ * @param {string} name - Customer's name
+ * @param {number} amount - Charge amount
+ * @param {string} description - Charge description
+ * @param {string} invoiceNumber - Invoice number
+ */
+async function sendManualChargeEmail(email, name, amount, description, invoiceNumber) {
+    try {
+        const mailOptions = {
+            from: `"${process.env.EMAIL_FROM_NAME || 'Blynk Billing'}" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: `Manual Charges - Invoice ${invoiceNumber}`,
+            html: getManualChargeTemplate(name, amount, description, invoiceNumber),
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log('Manual charge email sent successfully:', info.messageId);
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        console.error('Error sending manual charge email:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Send refund notification email
+ * @param {string} email - Recipient email address
+ * @param {string} name - Customer's name
+ * @param {number} amount - Refund amount
+ * @param {string} invoiceNumber - Original invoice number
+ * @param {string} reason - Refund reason
+ */
+async function sendRefundEmail(email, name, amount, invoiceNumber, reason) {
+    try {
+        const mailOptions = {
+            from: `"${process.env.EMAIL_FROM_NAME || 'Blynk Billing'}" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: `Refund Processed - Invoice ${invoiceNumber}`,
+            html: getRefundTemplate(name, amount, invoiceNumber, reason),
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log('Refund email sent successfully:', info.messageId);
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        console.error('Error sending refund email:', error);
+        return { success: false, error: error.message };
+    }
+}
+
 module.exports = {
     sendOTPEmail,
     sendWelcomeEmail,
     sendOrderConfirmationEmail,
     sendAdminInviteEmail,
     sendCustomerVerificationOTPEmail,
+    sendManualChargeEmail,
+    sendRefundEmail,
 };
-

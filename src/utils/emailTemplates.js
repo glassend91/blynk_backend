@@ -349,10 +349,197 @@ function getOrderConfirmationTemplate(name, planName, amount, orderId) {
     `;
 }
 
+/**
+ * Get manual charge notification email template
+ * @param {string} name - Customer's name
+ * @param {number} amount - Charge amount
+ * @param {string} description - Charge description
+ * @param {string} invoiceNumber - Invoice number
+ * @returns {string} - HTML email template
+ */
+function getManualChargeTemplate(name, amount, description, invoiceNumber) {
+    return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Notification - Blynk</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F8F8F8;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #F8F8F8; padding: 40px 20px;">
+        <tr>
+            <td align="center">
+                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); max-width: 600px;">
+                    <!-- Header -->
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #19BF66 0%, #15A357 100%); padding: 48px 40px; text-align: center;">
+                            <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Manual Charges</h1>
+                            <p style="color: rgba(255,255,255,0.9); margin: 12px 0 0 0; font-size: 15px; font-weight: 400;">Your account has been charged</p>
+                        </td>
+                    </tr>
+                    
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding: 48px 40px;">
+                            <p style="color: #0A0A0A; font-size: 16px; line-height: 1.6; margin: 0 0 24px 0; font-weight: 500;">
+                                Hello ${name},
+                            </p>
+                            
+                            <p style="color: #6F6C90; font-size: 15px; line-height: 1.7; margin: 0 0 32px 0;">
+                                We're writing to let you know that a successfull payment was processed on your account for the amount below.
+                            </p>
+                            
+                            <!-- Charge Details Box -->
+                            <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #F9FAFB; border-radius: 12px; padding: 32px; border: 1px solid #F3F4F6;">
+                                <tr>
+                                    <td style="padding-bottom: 24px; text-align: center;">
+                                        <span style="color: #6F6C90; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600;">Amount Paid</span>
+                                        <h2 style="color: #19BF66; margin: 8px 0 0 0; font-size: 42px; font-weight: 800;">$${amount.toFixed(2)} <span style="font-size: 18px; color: #6F6C90; font-weight: 500;">AUD</span></h2>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding-top: 24px; border-top: 1px solid #E5E7EB;">
+                                        <table width="100%" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td style="color: #6F6C90; font-size: 14px; padding-bottom: 8px;">Description:</td>
+                                                <td align="right" style="color: #0A0A0A; font-size: 14px; font-weight: 600; padding-bottom: 8px;">${description}</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="color: #6F6C90; font-size: 14px; padding-bottom: 8px;">Invoice #:</td>
+                                                <td align="right" style="color: #0A0A0A; font-size: 14px; font-weight: 600; padding-bottom: 8px;">${invoiceNumber}</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="color: #6F6C90; font-size: 14px;">Date:</td>
+                                                <td align="right" style="color: #0A0A0A; font-size: 14px; font-weight: 600;">${new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}</td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            <p style="color: #6F6C90; font-size: 14px; line-height: 1.6; margin: 32px 0 0 0; text-align: center;">
+                                You can view your full billing history and download your invoice PDF by logging into your <a href="https://app.blynk.com/dashboard" style="color: #19BF66; text-decoration: none; font-weight: 600;">customer dashboard</a>.
+                            </p>
+                        </td>
+                    </tr>
+                    
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #F8F8F8; padding: 32px 40px; text-align: center; border-top: 1px solid #DFDBE3;">
+                            <p style="color: #6F6C90; font-size: 12px; line-height: 1.6; margin: 0 0 8px 0;">
+                                If you have any questions regarding this charge, please contact our billing team.
+                            </p>
+                            <p style="color: #6F6C90; font-size: 12px; line-height: 1.6; margin: 0;">
+                                © ${new Date().getFullYear()} Blynk. All rights reserved.
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+    `;
+}
+
+/**
+ * Get refund notification email template
+ * @param {string} name - Customer's name
+ * @param {number} amount - Refund amount
+ * @param {string} invoiceNumber - Original invoice number
+ * @param {string} reason - Refund reason
+ * @returns {string} - HTML email template
+ */
+function getRefundTemplate(name, amount, invoiceNumber, reason) {
+    return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Refund Notification - Blynk</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F8F8F8;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #F8F8F8; padding: 40px 20px;">
+        <tr>
+            <td align="center">
+                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); max-width: 600px;">
+                    <!-- Header -->
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #401B60 0%, #5C3B86 100%); padding: 48px 40px; text-align: center;">
+                            <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Refund Processed</h1>
+                            <p style="color: rgba(255,255,255,0.9); margin: 12px 0 0 0; font-size: 15px; font-weight: 400;">Funds have been released to your payment method</p>
+                        </td>
+                    </tr>
+                    
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding: 48px 40px;">
+                            <p style="color: #0A0A0A; font-size: 16px; line-height: 1.6; margin: 0 0 24px 0; font-weight: 500;">
+                                Hello ${name},
+                            </p>
+                            
+                            <p style="color: #6F6C90; font-size: 15px; line-height: 1.7; margin: 0 0 32px 0;">
+                                We've processed a refund for your account. Please note that it may take 5-10 business days for the funds to appear in your bank account or on your card statement.
+                            </p>
+                            
+                            <!-- Refund Details Box -->
+                            <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #F9FAFB; border-radius: 12px; padding: 32px; border: 1px solid #F3F4F6;">
+                                <tr>
+                                    <td style="padding-bottom: 24px; text-align: center;">
+                                        <span style="color: #6F6C90; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600;">Refund Amount</span>
+                                        <h2 style="color: #401B60; margin: 8px 0 0 0; font-size: 42px; font-weight: 800;">$${amount.toFixed(2)} <span style="font-size: 18px; color: #6F6C90; font-weight: 500;">AUD</span></h2>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding-top: 24px; border-top: 1px solid #E5E7EB;">
+                                        <table width="100%" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td style="color: #6F6C90; font-size: 14px; padding-bottom: 8px;">Original Invoice:</td>
+                                                <td align="right" style="color: #0A0A0A; font-size: 14px; font-weight: 600; padding-bottom: 8px;">${invoiceNumber}</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="color: #6F6C90; font-size: 14px; padding-bottom: 8px;">Reason:</td>
+                                                <td align="right" style="color: #0A0A0A; font-size: 14px; font-weight: 600; padding-bottom: 8px;">${reason || 'Administrative adjustment'}</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="color: #6F6C90; font-size: 14px;">Date:</td>
+                                                <td align="right" style="color: #0A0A0A; font-size: 14px; font-weight: 600;">${new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}</td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #F8F8F8; padding: 32px 40px; text-align: center; border-top: 1px solid #DFDBE3;">
+                            <p style="color: #6F6C90; font-size: 12px; line-height: 1.6; margin: 0 0 8px 0;">
+                                If you have any questions, our support team is always here to help.
+                            </p>
+                            <p style="color: #6F6C90; font-size: 12px; line-height: 1.6; margin: 0;">
+                                © ${new Date().getFullYear()} Blynk. All rights reserved.
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+    `;
+}
+
 module.exports = {
     getOTPEmailTemplate,
     getPasswordResetTemplate,
     getOrderConfirmationTemplate,
     getCustomerVerificationOTPTemplate,
+    getManualChargeTemplate,
+    getRefundTemplate,
 };
-

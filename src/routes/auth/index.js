@@ -10,6 +10,7 @@ const Role = require('../../models/Role');
 const { sendOTPEmail, sendWelcomeEmail, sendAdminInviteEmail } = require('../../utils/emailService');
 const Service = require('../../models/Service');
 const ServiceSubscription = require('../../models/ServiceSubscription');
+const WholesalerPlan = require('../../models/WholesalerPlan');
 const otpProviderService = require('../../services/otpProviderService');
 const wholesalerService = require('../../services/wholesalerService');
 
@@ -439,12 +440,29 @@ router.post(
                             if (!contactResult.success) throw new Error(`NBN Contact Creation Failed: ${contactResult.message}`);
 
                             // 3. Submit NBN Order
+                            let finalBandwidthId = selectedPlan.id;
+
+                            // If it's a manual/wholesaler plan (MongoDB ID), resolve the final bandwidth_id
+                            if (mongoose.isValidObjectId(selectedPlan.id)) {
+                                // 1. Try WholesalerPlan first
+                                const wPlan = await WholesalerPlan.findById(selectedPlan.id);
+                                if (wPlan && wPlan.bandwidth_id) {
+                                    finalBandwidthId = wPlan.bandwidth_id;
+                                } else {
+                                    // 2. Fallback to Service model
+                                    const svc = await Service.findById(selectedPlan.id);
+                                    if (svc && svc.wholesalerPlanId) {
+                                        finalBandwidthId = svc.wholesalerPlanId;
+                                    }
+                                }
+                            }
+
                             const nbnOrderPayload = {
                                 loc_id: locId,
                                 customer_id: user.wholesalerCustomerId,
                                 site_id: siteResult.siteId,
                                 contact_id: contactResult.contactId,
-                                bandwidth_id: selectedPlan.id,
+                                bandwidth_id: finalBandwidthId,
                                 line: ntdId || "NEW",
                                 port: port || "",
                                 service_ref: serviceRef || "",

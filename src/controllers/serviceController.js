@@ -5,6 +5,7 @@ const Role = require('../models/Role');
 const PaymentMethod = require('../models/PaymentMethod');
 const BillingAccount = require('../models/BillingAccount');
 const Invoice = require('../models/Invoice');
+const WholesalerPlan = require('../models/WholesalerPlan');
 const wholesalerService = require('../services/wholesalerService');
 
 const BILLING_LABELS = {
@@ -330,6 +331,7 @@ class ServiceController {
                 features = [],
                 staticIP,
                 slaDetails,
+                wholesalerPlanId,
             } = req.body;
 
             if (!SUPPORTED_SERVICE_TYPES.includes(serviceType)) {
@@ -382,6 +384,7 @@ class ServiceController {
                 visibilityStatus,
                 isActive,
                 isAvailable: true,
+                wholesalerPlanId,
             });
 
             const mapped = mapServiceToAdminRow(service, 0);
@@ -900,32 +903,54 @@ class ServiceController {
             console.log(`[NBN AVAILABILITY] Checking availability for: ${address}`);
 
             // 1. Search for address to get locId
-            const searchResult = await wholesalerService.searchNbnAddress(address);
-            if (!searchResult.success) {
-                return res.status(500).json(searchResult);
+            let locId = "";
+            let location = null;
+            let sqData = {};
+
+            try {
+                const searchResult = await wholesalerService.searchNbnAddress(address);
+                if (searchResult.success && searchResult.data?.locations?.length > 0) {
+                    location = searchResult.data.locations[0];
+                    locId = location.locId;
+
+                    if (locId) {
+                        // 2. Perform SQ using locId
+                        const sqResult = await wholesalerService.getNbnServiceQualification(locId);
+                        if (sqResult.success) {
+                            sqData = sqResult.data || {};
+                        }
+                    }
+                }
+            } catch (sqErr) {
+                console.error('[NBN AVAILABILITY] Wholesaler check failed, falling back to manual plans:', sqErr);
             }
 
-            const locations = searchResult.data?.locations || [];
-            if (locations.length === 0) {
-                return res.status(404).json({ success: false, message: 'Location not found' });
-            }
+            // 3. Fetch published NBN plans from WholesalerPlan model
+            const manualPlans = await WholesalerPlan.find({
+                type: 'nbn',
+                isPublish: true
+            }).sort({ price: 1 });
 
-            const locId = locations[0].locId;
-            if (!locId) {
-                return res.status(500).json({ success: false, message: 'Could not retrieve Location ID' });
-            }
-
-            // 2. Perform SQ using locId
-            const sqResult = await wholesalerService.getNbnServiceQualification(locId);
-            if (!sqResult.success) {
-                return res.status(500).json(sqResult);
-            }
+            const manualBandwidths = manualPlans.map(p => {
+                const bId = p.bandwidth_id ? String(p.bandwidth_id) : p._id.toString();
+                return {
+                    id: bId.startsWith('id_') ? bId : `id_${bId}`,
+                    _mongoId: p._id.toString(),
+                    label: p.custom_name || p.label,
+                    fee: p.price ? p.price.toString() : '0',
+                    isManual: true,
+                    speed: p.speed || 'High Speed',
+                    bandwidth_id: p.bandwidth_id,
+                    features: p.features
+                };
+            });
 
             return res.json({
                 success: true,
                 locId,
-                location: locations[0],
-                ...sqResult.data
+                location: location,
+                bandwidths: manualBandwidths, // Override with manual plans
+                originalBandwidths: sqData?.bandwidths || [] // Keep original for reference
             });
 
         } catch (error) {
@@ -1072,6 +1097,7 @@ class ServiceController {
                 features = [],
                 staticIP,
                 slaDetails,
+                wholesalerPlanId,
             } = req.body;
 
             const service = await Service.findById(serviceId);
@@ -1120,6 +1146,7 @@ class ServiceController {
             service.billingCycle = billingCycle;
             service.specifications = buildSpecifications(serviceType, speedOrData, staticIP, slaDetails);
             service.features = mapFeaturesPayload(features);
+            service.wholesalerPlanId = wholesalerPlanId;
             service.visibilityStatus = visibilityStatus;
             service.isActive = isActive;
 

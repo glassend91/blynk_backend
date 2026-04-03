@@ -277,16 +277,16 @@ const wholesalerService = {
 
             console.log(`[WHOLESALER] Searching NBN address: ${query}...`);
 
-            const response = await axios.post(`${WHOLESALER_API_URL.replace('/customer', '')}/nbn/address/search`, { query }, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'X-Tenant-Id': tenantId,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
-            });
+            // const response = await axios.post(`${WHOLESALER_API_URL.replace('/customer', '')}/nbn/address/search`, { query }, {
+            //     headers: {
+            //         'Authorization': `Bearer ${token}`,
+            //         'X-Tenant-Id': tenantId,
+            //         'Content-Type': 'application/json',
+            //         'Accept': 'application/json'
+            //     }
+            // });
 
-            return { success: true, data: response.data?.data || response.data };
+            // return { success: true, data: response.data?.data || response.data };
 
         } catch (error) {
             console.error('[WHOLESALER] Failed to search NBN address:', error.response?.data || error.message);
@@ -548,7 +548,7 @@ const wholesalerService = {
                 site_id: parseInt(payload.site_id, 10),
                 contact_id: parseInt(payload.contact_id, 10),
                 fiber_uplift: false,
-                bandwidth_id: `id_${payload.bandwidth_id}`,
+                bandwidth_id: payload.bandwidth_id?.startsWith('id_') ? payload.bandwidth_id : `id_${payload.bandwidth_id}`,
                 sla: 14,
                 static_ip: !!payload.static_ip,
                 ipv6_disabled: false,

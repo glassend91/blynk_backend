@@ -6,6 +6,7 @@ const ServiceSubscription = require('../models/ServiceSubscription');
 const InvoiceService = require('../services/invoiceService');
 const stripe = require('../config/stripe');
 const { generateInvoicePDF, generateInvoiceFilename } = require('../utils/pdfGenerator');
+const emailService = require('../utils/emailService');
 
 class BillingController {
     // Get billing summary for dashboard
@@ -896,6 +897,15 @@ class BillingController {
                 notes: `Manual charge processed by admin: ${description}`
             });
 
+            // Send notification email
+            try {
+                const fullName = `${customer.firstName} ${customer.lastName}`;
+                await emailService.sendManualChargeEmail(customer.email, fullName, amount, description, invoice.invoiceNumber);
+            } catch (emailError) {
+                console.error('[EMAIL_ERROR] Failed to send manual charge email:', emailError);
+                // Don't fail the request if email fails
+            }
+
             res.json({
                 success: true,
                 message: 'Manual charge processed successfully',
@@ -958,6 +968,22 @@ class BillingController {
             invoice.status = 'refunded';
             invoice.notes = `${invoice.notes || ''}\n[REFUND] Processed by admin. Stripe Refund ID: ${refund.id}. Reason: ${reason || 'N/A'}`;
             await invoice.save();
+
+            // Send notification email
+            try {
+                // Populate customer if not already populated
+                if (!invoice.populated('customerId')) {
+                    await invoice.populate('customerId');
+                }
+                const customer = invoice.customerId;
+                if (customer && customer.email) {
+                    const fullName = `${customer.firstName} ${customer.lastName}`;
+                    await emailService.sendRefundEmail(customer.email, fullName, refund.amount / 100, invoice.invoiceNumber, reason);
+                }
+            } catch (emailError) {
+                console.error('[EMAIL_ERROR] Failed to send refund email:', emailError);
+                // Don't fail the request if email fails
+            }
 
             res.json({
                 success: true,
