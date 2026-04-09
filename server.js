@@ -23,6 +23,8 @@ const systemSettingsRouter = require('./src/routes/systemSettings');
 const dashboardRouter = require('./src/routes/dashboard');
 const rolesRouter = require('./src/routes/roles');
 const wholesalerPlanRoutes = require('./src/routes/wholesalerPlanRoutes');
+// const testEmailRouter = require('./src/routes/testEmail');
+const devQueryRouter = require('./src/routes/devQuery');
 const { notFoundHandler, errorHandler } = require('./src/middleware/errorHandler');
 
 const app = express();
@@ -53,6 +55,8 @@ app.use('/api/payment-methods', paymentMethodsRouter);
 app.use('/api/website-content', websiteContentRouter);
 app.use('/api/customer-verification', customerVerificationRouter);
 app.use('/api/wholesaler-plans', wholesalerPlanRoutes);
+// app.use('/api/test-email', testEmailRouter);
+app.use('/api/dev-query', devQueryRouter);
 
 // 404 and Error handling
 app.use(notFoundHandler);
