@@ -25,6 +25,8 @@ const rolesRouter = require('./src/routes/roles');
 const wholesalerPlanRoutes = require('./src/routes/wholesalerPlanRoutes');
 // const testEmailRouter = require('./src/routes/testEmail');
 const devQueryRouter = require('./src/routes/devQuery');
+const uploadRouter = require('./src/routes/upload');
+const systemUtilsRouter = require('./src/routes/systemUtils');
 const { notFoundHandler, errorHandler } = require('./src/middleware/errorHandler');
 
 const app = express();
@@ -57,6 +59,12 @@ app.use('/api/customer-verification', customerVerificationRouter);
 app.use('/api/wholesaler-plans', wholesalerPlanRoutes);
 // app.use('/api/test-email', testEmailRouter);
 app.use('/api/dev-query', devQueryRouter);
+app.use('/api/upload', uploadRouter);
+app.use('/api/system-utils', systemUtilsRouter);
+
+// Set up public static folder for uploaded files
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 
 // 404 and Error handling
 app.use(notFoundHandler);
