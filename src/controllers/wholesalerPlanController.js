@@ -43,30 +43,32 @@ const wholesalerPlanController = {
                 connection_type_name: type === 'nbn' ? 'NBN' : 'Mobile'
             });
 
-            // If publish is requested (either to public or internal), create a retail Service plan
-            if (publish) {
-                // Find an admin to be the provider
-                const admin = await User.findOne({ role: 'admin' });
-                if (!admin) {
-                    throw new Error('Default administrator not found for service creation');
-                }
+            console.log(newPlan);
 
-                await Service.create({
-                    serviceName: custom_name || label,
-                    serviceType: type === 'nbn' ? 'NBN' : 'Mobile',
-                    wholesalerPlanId: newPlan._id, // Link to the wholesaler plan record ID
-                    price: price || 0,
-                    visibilityStatus: visibilityStatus || 'internal',
-                    providerId: admin._id,
-                    specifications: {
-                        network: 'ConnectTel',
-                        dataAllowance: 'Unlimited',
-                        // Speed is stored as string like "50/20"
-                    },
-                    features: (features || []).map(f => ({ name: f, isIncluded: true })),
-                    description: `Automatic retail plan for ${label}`
-                });
-            }
+            // If publish is requested (either to public or internal), create a retail Service plan
+            // if (publish) {
+            //     // Find an admin to be the provider
+            //     const admin = await User.findOne({ role: 'admin' || 'superAdmin' });
+            //     if (!admin) {
+            //         throw new Error('Default administrator not found for service creation');
+            //     }
+
+            //     await Service.create({
+            //         serviceName: custom_name || label,
+            //         serviceType: type === 'nbn' ? 'NBN' : 'Mobile',
+            //         wholesalerPlanId: newPlan._id, // Link to the wholesaler plan record ID
+            //         price: price || 0,
+            //         visibilityStatus: visibilityStatus || 'internal',
+            //         providerId: admin._id,
+            //         specifications: {
+            //             network: 'ConnectTel',
+            //             dataAllowance: 'Unlimited',
+            //             // Speed is stored as string like "50/20"
+            //         },
+            //         features: (features || []).map(f => ({ name: f, isIncluded: true })),
+            //         description: `Automatic retail plan for ${label}`
+            //     });
+            // }
 
             res.status(201).json({ success: true, data: newPlan });
         } catch (error) {
