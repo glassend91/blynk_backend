@@ -89,7 +89,7 @@ const wholesalerPlanController = {
                 return res.status(400).json({ success: false, message: 'Failed to fetch plans from wholesaler API' });
             }
 
-            const { dataBankPlans = [], dataPoolPlans = [] } = response.data;
+            const { dataBankPlans = [], dataPoolPlans = [], mobileRatePlans = [] } = response.data;
             const bulkOps = [];
 
             // Helper to prepare upsert operations
@@ -118,6 +118,7 @@ const wholesalerPlanController = {
 
             prepareOps(dataBankPlans, 'dataBankPlans');
             prepareOps(dataPoolPlans, 'dataPoolPlans');
+            prepareOps(mobileRatePlans, 'mobileRatePlans');
 
             if (bulkOps.length > 0) {
                 await WholesalerPlan.bulkWrite(bulkOps);

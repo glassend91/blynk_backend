@@ -1273,8 +1273,11 @@ router.put(
         body('name').optional().isString().trim().notEmpty(),
         body('firstName').optional().isString().trim().notEmpty(),
         body('lastName').optional().isString().trim().notEmpty(),
+        body('email').optional().isEmail().withMessage('Valid email is required'),
         body('phone').optional().isString().trim(),
         body('serviceAddress').optional().isString().trim(),
+        body('billingAddress').optional().isString().trim(),
+        body('dateOfBirth').optional().isString().trim(),
         body('type').optional().isIn(['NBN', 'MBL', 'MBB', 'SME']),
         body('mblSelectedNumber').optional().isString().trim(),
         body('mblKeepExistingNumber').optional().isBoolean(),
@@ -1282,6 +1285,9 @@ router.put(
         body('mblCurrentProvider').optional().isString().trim(),
         body('role').optional().isString().trim().notEmpty(),
         body('status').optional().isString().trim().notEmpty(),
+        body('identity').optional().isObject(),
+        body('businessDetails').optional().isObject(),
+        body('password').optional().isString().isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
     ],
     async (req, res, next) => {
         try {
@@ -1311,7 +1317,13 @@ router.put(
                 }
             }
 
-            const { name, role, status, firstName, lastName, phone, serviceAddress, type, mblSelectedNumber, mblKeepExistingNumber, mblCurrentMobileNumber, mblCurrentProvider, customerType } = req.body;
+            const {
+                name, role, status, firstName, lastName, email, phone,
+                serviceAddress, billingAddress, dateOfBirth, type,
+                mblSelectedNumber, mblKeepExistingNumber, mblCurrentMobileNumber,
+                mblCurrentProvider, customerType, identity, businessDetails,
+                password
+            } = req.body;
             const userId = req.params.id;
 
             const user = await User.findById(userId);
@@ -1322,6 +1334,18 @@ router.put(
                 });
             }
 
+            // Update email if provided and different
+            if (email && email.toLowerCase() !== user.email) {
+                const existingUser = await User.findOne({ email: email.toLowerCase(), _id: { $ne: userId } });
+                if (existingUser) {
+                    return res.status(409).json({
+                        success: false,
+                        message: 'Email is already in use by another account',
+                    });
+                }
+                user.email = email.toLowerCase();
+            }
+
             // Update name (split into first/last)
             if (name) {
                 const parts = String(name).trim().split(' ');
@@ -1329,28 +1353,25 @@ router.put(
                 user.lastName = parts.slice(1).join(' ') || user.lastName;
             }
 
-            if (firstName) {
-                user.firstName = firstName;
+            if (firstName) user.firstName = firstName;
+            if (lastName) user.lastName = lastName;
+            if (phone) user.phone = phone;
+            if (serviceAddress) user.serviceAddress = serviceAddress;
+            if (billingAddress) user.billingAddress = billingAddress;
+            if (dateOfBirth) user.dateOfBirth = dateOfBirth;
+            if (type) user.type = type;
+            if (mblSelectedNumber) user.mblSelectedNumber = mblSelectedNumber;
+            if (mblKeepExistingNumber !== undefined) user.mblKeepExistingNumber = mblKeepExistingNumber;
+            if (mblCurrentMobileNumber) user.mblCurrentMobileNumber = mblCurrentMobileNumber;
+            if (mblCurrentProvider) user.mblCurrentProvider = mblCurrentProvider;
+            if (customerType) user.customerType = customerType;
+
+            if (identity) {
+                user.identity = { ...user.identity, ...identity };
             }
 
-            if (lastName) {
-                user.lastName = lastName;
-            }
-
-            if (phone) {
-                user.phone = phone;
-            }
-
-            if (serviceAddress) {
-                user.serviceAddress = serviceAddress;
-            }
-
-            if (type) {
-                user.type = type;
-            }
-
-            if (mblSelectedNumber) {
-                user.mblSelectedNumber = mblSelectedNumber;
+            if (businessDetails) {
+                user.businessDetails = { ...user.businessDetails, ...businessDetails };
             }
 
             // Update role - map from UI label or raw role value
@@ -1369,6 +1390,12 @@ router.put(
             // Update status for admin UI
             if (status && ['Active', 'Inactive', 'Pending'].includes(status)) {
                 user.status = status;
+            }
+
+            // Update password if provided
+            if (password) {
+                const salt = await bcrypt.genSalt(10);
+                user.passwordHash = await bcrypt.hash(password, salt);
             }
 
             await user.save();
@@ -1421,6 +1448,7 @@ router.delete(
                 });
             }
 
+            user.email = `DELETED_${Date.now()}_${user.email}`;
             user.isDeleted = true;
             user.status = 'Inactive';
             await user.save();

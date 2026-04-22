@@ -909,15 +909,15 @@ class ServiceController {
 
             try {
                 const searchResult = await wholesalerService.searchNbnAddress(address);
-                if (searchResult.success && searchResult.data?.locations?.length > 0) {
-                    location = searchResult.data.locations[0];
-                    locId = location.locId;
+                if (searchResult?.success && searchResult?.data?.locations?.length > 0) {
+                    location = searchResult?.data?.locations[0];
+                    locId = location?.locId;
 
                     if (locId) {
                         // 2. Perform SQ using locId
                         const sqResult = await wholesalerService.getNbnServiceQualification(locId);
-                        if (sqResult.success) {
-                            sqData = sqResult.data || {};
+                        if (sqResult?.success) {
+                            sqData = sqResult?.data || {};
                         }
                     }
                 }
@@ -1205,6 +1205,13 @@ class ServiceController {
             }
 
             service.isActive = isActive;
+            
+            // If toggling to active, ensure visibility is set to public if it was hidden
+            if (isActive && service.visibilityStatus === "hidden") {
+                service.visibilityStatus = "public";
+            }
+            // If toggling to inactive, we can keep the visibility status as is (Draft status is determined by isActive: false)
+            
             await service.save();
 
             const mapped = mapServiceToAdminRow(service, 0);

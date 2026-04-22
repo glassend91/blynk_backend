@@ -80,6 +80,14 @@ const storeSchema = new mongoose.Schema({
         default: 'Active'
     },
     technicians: [technicianSchema],
+    lat: {
+        type: Number,
+        required: true
+    },
+    lng: {
+        type: Number,
+        required: true
+    },
     deletedAt: {
         type: Date,
         default: null
@@ -102,6 +110,8 @@ storeSchema.methods.toSafeJSON = function() {
         address: this.address,
         hours: this.hours,
         phone: this.phone,
+        lat: this.lat,
+        lng: this.lng,
         googleLink: this.googleLink || undefined,
         bannerUrl: this.bannerUrl || undefined,
         pitch: this.pitch || undefined,

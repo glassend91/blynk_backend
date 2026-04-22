@@ -29,7 +29,7 @@ const wholesalerPlanSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ['dataBankPlans', 'dataPoolPlans', 'nbn'],
+        enum: ['dataBankPlans', 'dataPoolPlans', 'mobileRatePlans', 'nbn'],
         required: true
     },
     custom_name: {

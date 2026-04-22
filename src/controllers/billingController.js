@@ -894,7 +894,10 @@ class BillingController {
                 paymentMethod: defaultMethod._id,
                 paymentDate: new Date(),
                 paymentReference: paymentIntent.id,
-                notes: `Manual charge processed by admin: ${description}`
+                notes: `Manual charge processed by admin: ${description}`,
+                metadata: {
+                    type: 'manual_charge'
+                }
             });
 
             // Send notification email

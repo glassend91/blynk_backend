@@ -14,7 +14,8 @@ const roleSchema = new mongoose.Schema(
         permissions: {
             type: Object,
             default: {}
-        }
+        },
+        monthlyCreditLimit: { type: Number, default: 0 }
     },
     { timestamps: true }
 );
@@ -27,6 +28,7 @@ roleSchema.methods.toSafeJSON = function () {
         usersCount: this.usersCount,
         badge: this.badge,
         permissions: this.permissions || {},
+        monthlyCreditLimit: this.monthlyCreditLimit || 0,
         createdAt: this.createdAt,
         updatedAt: this.updatedAt
     };

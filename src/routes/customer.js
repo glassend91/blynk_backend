@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, requirePermission } = require('../middleware/auth');
+const mongoose = require('mongoose');
 const BillingAccount = require('../models/BillingAccount');
 const User = require('../models/User');
 const PaymentMethod = require('../models/PaymentMethod');
@@ -62,9 +63,7 @@ router.post(
 
             // Apply credit (reduce balance)
             const creditAmount = parseFloat(amount);
-            billingAccount.currentBalance = Math.max(0, (billingAccount.currentBalance || 0) - creditAmount);
-
-            await billingAccount.save();
+            billingAccount.currentBalance = (billingAccount.currentBalance || 0) - creditAmount;
 
             // Log the credit application (metadata)
             if (!billingAccount.metadata) {
@@ -73,12 +72,18 @@ router.post(
             if (!billingAccount.metadata.credits) {
                 billingAccount.metadata.credits = [];
             }
+            
+            const creditId = new mongoose.Types.ObjectId();
             billingAccount.metadata.credits.push({
+                id: creditId,
                 amount: creditAmount,
                 reasonCode: reasonCode || 'manual',
                 appliedBy: req.user.id,
                 appliedAt: new Date(),
             });
+
+            // Mark the metadata as modified since it's a mixed type
+            billingAccount.markModified('metadata');
             await billingAccount.save();
 
             res.status(200).json({
@@ -86,9 +91,91 @@ router.post(
                 message: `Credit of $${creditAmount.toFixed(2)} applied successfully`,
                 data: {
                     customerId,
+                    creditId,
                     creditAmount,
                     newBalance: billingAccount.currentBalance,
                     reasonCode: reasonCode || 'manual'
+                }
+            });
+        } catch (error) {
+            next(error);
+        }
+    }
+);
+
+/**
+ * @route   POST /api/v1/customer/remove-credit
+ * @desc    Remove an applied credit from a customer's billing account
+ * @access  Private (Admin with billing.credits_refunds permission)
+ * @body    customerId, creditId
+ */
+router.post(
+    '/remove-credit',
+    requirePermission('billing.credits_refunds'),
+    [
+        body('customerId').isMongoId().withMessage('Valid customer ID is required'),
+        body('creditId').notEmpty().withMessage('Credit ID is required')
+    ],
+    async (req, res, next) => {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    errors: errors.array()
+                });
+            }
+
+            const { customerId, creditId } = req.body;
+
+            // Find billing account
+            const billingAccount = await BillingAccount.findOne({ customerId });
+            if (!billingAccount || !billingAccount.metadata || !billingAccount.metadata.credits) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Billing account or credits not found'
+                });
+            }
+
+            // Find the credit to remove
+            const creditIndex = billingAccount.metadata.credits.findIndex(
+                (c) => c.id && c.id.toString() === creditId.toString()
+            );
+
+            if (creditIndex === -1) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Credit entry not found'
+                });
+            }
+
+            const credit = billingAccount.metadata.credits[creditIndex];
+            
+            // Reverse the credit (add back to balance)
+            billingAccount.currentBalance = (billingAccount.currentBalance || 0) + credit.amount;
+
+            // Log removal in metadata (optional: could keep a history of removals)
+            if (!billingAccount.metadata.removedCredits) {
+                billingAccount.metadata.removedCredits = [];
+            }
+            billingAccount.metadata.removedCredits.push({
+                ...credit,
+                removedBy: req.user.id,
+                removedAt: new Date()
+            });
+
+            // Remove from active credits
+            billingAccount.metadata.credits.splice(creditIndex, 1);
+
+            billingAccount.markModified('metadata');
+            await billingAccount.save();
+
+            res.status(200).json({
+                success: true,
+                message: `Credit of $${credit.amount.toFixed(2)} removed successfully`,
+                data: {
+                    customerId,
+                    newBalance: billingAccount.currentBalance
                 }
             });
         } catch (error) {

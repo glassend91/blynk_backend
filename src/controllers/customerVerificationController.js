@@ -13,7 +13,7 @@ class CustomerVerificationController {
                 });
             }
 
-            const result = await customerVerificationService.sendOTP(emailOrPhone, channel, purpose);
+            const result = await customerVerificationService.sendOTP(emailOrPhone, channel, purpose, req.user.id);
 
             res.status(200).json({
                 success: true,
@@ -273,6 +273,52 @@ class CustomerVerificationController {
                 success: false,
                 message: error.message
             });
+        }
+    }
+
+    // Get authorised representatives
+    async getAuthorisedReps(req, res) {
+        try {
+            const { customerId } = req.params;
+            const reps = await customerVerificationService.getAuthorisedReps(customerId);
+            res.status(200).json({ success: true, data: reps });
+        } catch (error) {
+            res.status(400).json({ success: false, message: error.message });
+        }
+    }
+
+    // Add authorised representative
+    async addAuthorisedRep(req, res) {
+        try {
+            const { customerId } = req.params;
+            const repData = req.body;
+            const reps = await customerVerificationService.addAuthorisedRep(customerId, repData);
+            res.status(201).json({ success: true, message: 'Authorised representative added successfully', data: reps });
+        } catch (error) {
+            res.status(400).json({ success: false, message: error.message });
+        }
+    }
+
+    // Update authorised representative
+    async updateAuthorisedRep(req, res) {
+        try {
+            const { customerId, repId } = req.params;
+            const repData = req.body;
+            const reps = await customerVerificationService.updateAuthorisedRep(customerId, repId, repData);
+            res.status(200).json({ success: true, message: 'Authorised representative updated successfully', data: reps });
+        } catch (error) {
+            res.status(400).json({ success: false, message: error.message });
+        }
+    }
+
+    // Remove authorised representative
+    async removeAuthorisedRep(req, res) {
+        try {
+            const { customerId, repId } = req.params;
+            const reps = await customerVerificationService.removeAuthorisedRep(customerId, repId);
+            res.status(200).json({ success: true, message: 'Authorised representative removed successfully', data: reps });
+        } catch (error) {
+            res.status(400).json({ success: false, message: error.message });
         }
     }
 }
