@@ -95,6 +95,16 @@ const userSchema = new mongoose.Schema(
 
         // Soft delete flag for admin operations
         isDeleted: { type: Boolean, default: false },
+        // Authorised Representatives (Max 3 for disability support compliance)
+        authorisedRepresentatives: [{
+            firstName: { type: String, trim: true },
+            lastName: { type: String, trim: true },
+            email: { type: String, trim: true, lowercase: true },
+            phone: { type: String, trim: true },
+            relationship: { type: String, trim: true },
+            authorisationLevel: { type: String, enum: ['full', 'billing', 'technical', 'read_only'], default: 'full' },
+            createdAt: { type: Date, default: Date.now }
+        }],
     },
     { timestamps: true }
 );
@@ -130,6 +140,7 @@ userSchema.methods.toSafeJSON = function () {
         status: this.status,
         isDeleted: this.isDeleted,
         customerType: this.customerType,
+        authorisedRepresentatives: this.authorisedRepresentatives,
         createdAt: this.createdAt,
         updatedAt: this.updatedAt,
     };

@@ -9,8 +9,7 @@ const billingAccountSchema = new mongoose.Schema({
     },
     currentBalance: {
         type: Number,
-        default: 0,
-        min: 0
+        default: 0
     },
     creditLimit: {
         type: Number,
@@ -109,7 +108,7 @@ billingAccountSchema.methods.addToBalance = function (amount) {
 
 // Method to subtract from balance
 billingAccountSchema.methods.subtractFromBalance = function (amount) {
-    this.currentBalance = Math.max(0, this.currentBalance - amount);
+    this.currentBalance = this.currentBalance - amount;
     return this.save();
 };
 

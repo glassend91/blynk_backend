@@ -29,6 +29,8 @@ class StoreService {
                 address: s.address,
                 hours: s.hours,
                 phone: s.phone,
+                lat: s.lat,
+                lng: s.lng,
                 googleLink: s.googleLink || undefined,
                 bannerUrl: s.bannerUrl || undefined,
                 pitch: s.pitch || undefined,
@@ -67,7 +69,7 @@ class StoreService {
     // Create a new store
     async createStore(data) {
         try {
-            const { name, address, hours, phone, googleLink, bannerUrl, pitch, status, technicians } = data;
+            const { name, address, hours, phone, googleLink, bannerUrl, pitch, status, technicians, lat, lng } = data;
 
             if (!name || !address || !hours || !phone) {
                 throw new Error('Missing required fields: name, address, hours, and phone are required');
@@ -82,6 +84,8 @@ class StoreService {
                 bannerUrl: bannerUrl ? bannerUrl.trim() : '',
                 pitch: pitch ? pitch.trim() : '',
                 status: status || 'Active',
+                lat: lat !== undefined ? Number(lat) : undefined,
+                lng: lng !== undefined ? Number(lng) : undefined,
                 technicians: technicians ? technicians.map(t => ({
                     fullName: t.fullName.trim(),
                     roleTitle: t.roleTitle ? t.roleTitle.trim() : '',
@@ -106,7 +110,7 @@ class StoreService {
     // Update store
     async updateStore(id, data) {
         try {
-            const { name, address, hours, phone, googleLink, bannerUrl, pitch, status, technicians } = data;
+            const { name, address, hours, phone, googleLink, bannerUrl, pitch, status, technicians, lat, lng } = data;
 
             const updateData = {};
             if (name !== undefined) updateData.name = name.trim();
@@ -117,6 +121,8 @@ class StoreService {
             if (bannerUrl !== undefined) updateData.bannerUrl = bannerUrl ? bannerUrl.trim() : '';
             if (pitch !== undefined) updateData.pitch = pitch ? pitch.trim() : '';
             if (status !== undefined) updateData.status = status;
+            if (lat !== undefined) updateData.lat = Number(lat);
+            if (lng !== undefined) updateData.lng = Number(lng);
             if (technicians !== undefined) {
                 updateData.technicians = technicians.map(t => ({
                     fullName: t.fullName.trim(),

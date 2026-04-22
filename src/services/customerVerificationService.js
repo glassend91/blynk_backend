@@ -7,6 +7,7 @@ const BillingAccount = require('../models/BillingAccount');
 const PaymentMethod = require('../models/PaymentMethod');
 const { sendCustomerVerificationOTPEmail } = require('../utils/emailService');
 const Invoice = require('../models/Invoice');
+const otpProviderService = require('./otpProviderService');
 
 class CustomerVerificationService {
     // Generate a 6-digit OTP
@@ -15,7 +16,7 @@ class CustomerVerificationService {
     }
 
     // Send OTP via Email or SMS
-    async sendOTP(emailOrPhone, channel, purpose) {
+    async sendOTP(emailOrPhone, channel, purpose, adminId) {
         try {
             if (!emailOrPhone) {
                 throw new Error('Email or phone number is required');
@@ -92,8 +93,42 @@ class CustomerVerificationService {
                     // In production, you might want to handle this differently
                 }
             } else if (channel === 'sms' || (!channel && !isEmail)) {
-                // TODO: Implement SMS sending service
-                console.log(`OTP for phone ${phone}: ${otpCode} (SMS sending not yet implemented)`);
+                // Send SMS OTP via external provider (ConnectTel)
+                try {
+                    const smsRes = await otpProviderService.sendSMSOTP(phone);
+                    if (smsRes.success) {
+                        const transactionId = smsRes.data?.transactionId || smsRes.data?.data?.transactionId;
+                        console.log(`[CUSTOMER VERIFICATION] SMS sent successfully. Transaction ID: ${transactionId}`);
+                        
+                        // Update the OTP record with the transactionId
+                        otp.transactionId = transactionId;
+                        await otp.save();
+                    } else {
+                        console.error(`[CUSTOMER VERIFICATION] SMS failed:`, smsRes.error || smsRes.message);
+                        throw new Error(smsRes.message || 'Failed to send SMS OTP via provider');
+                    }
+                } catch (smsError) {
+                    console.error('Error in sendSMSOTP via provider:', smsError);
+                    throw new Error(`Failed to send SMS: ${smsError.message}`);
+                }
+            }
+
+            // Audit Log: Record that OTP was sent
+            if (adminId) {
+                try {
+                    const method = channel === 'sms' || (!channel && !isEmail) ? 'SMS' : 'Email';
+                    await this.createCustomerNote({
+                        customerId: customer._id,
+                        noteType: 'Verification',
+                        priority: 'Normal',
+                        content: `OTP sent via ${method} for customer verification.`,
+                        tags: ['verification', 'otp', 'sent'],
+                        createdBy: adminId
+                    });
+                } catch (noteErr) {
+                    console.error('Failed to create audit note for sendOTP:', noteErr);
+                    // Don't fail the primary action (sending OTP) if logging fails
+                }
             }
 
             return {
@@ -130,7 +165,8 @@ class CustomerVerificationService {
             // Find and verify OTP
             const otp = await OTP.findOne({
                 [isEmail ? 'email' : 'phone']: isEmail ? email : phone,
-                otp: otpCode,
+                otp: isEmail ? otpCode : undefined, // For SMS, we might not have the code locally
+                transactionId: !isEmail ? { $exists: true } : undefined, // For SMS, look for transactionId
                 verified: false
             }).sort({ createdAt: -1 });
 
@@ -141,12 +177,76 @@ class CustomerVerificationService {
                     {
                         status: 'Failed',
                         failedAt: new Date(),
-                        failureReason: 'Invalid OTP code',
+                        failureReason: 'Invalid verification session or expired code',
                         adminNotes: adminNotes || ''
                     },
                     { upsert: true, new: true }
                 );
-                throw new Error('Invalid OTP code');
+                throw new Error('Invalid or expired verification session');
+            }
+
+            // If it's an SMS OTP with a transactionId, verify via external provider
+            if (otp.channel === 'sms' && otp.transactionId) {
+                const verifyRes = await otpProviderService.verifySMSOTP(otp.transactionId, otpCode);
+                
+                if (!verifyRes.success || !(verifyRes.data?.success || verifyRes.data?.verified)) {
+                    otp.attempts += 1;
+                    await otp.save();
+
+                    await CustomerVerification.findOneAndUpdate(
+                        { customerId: customer._id, deletedAt: null },
+                        {
+                            status: 'Failed',
+                            failedAt: new Date(),
+                            failureReason: verifyRes.error?.message || verifyRes.message || 'Invalid SMS code',
+                            adminNotes: adminNotes || ''
+                        },
+                        { upsert: true, new: true }
+                    );
+
+                    // Audit Log: Record failed verification (invalid code)
+                    if (adminId) {
+                        try {
+                            const method = otp.channel === 'sms' ? 'SMS' : 'Email';
+                            await this.createCustomerNote({
+                                customerId: customer._id,
+                                noteType: 'Verification',
+                                priority: 'High',
+                                content: `Identity verification ${method === 'SMS' ? 'via SMS' : 'via Email'} failed. Reason: ${verifyRes.error?.message || verifyRes.message || 'Invalid code'}.`,
+                                tags: ['verification', 'otp', 'failed'],
+                                createdBy: adminId
+                            });
+                        } catch (noteErr) {
+                            console.error('Failed to create audit note for verifyOTP failure:', noteErr);
+                        }
+                    }
+
+                    throw new Error(verifyRes.error?.message || verifyRes.message || 'Invalid verification code');
+                }
+            } else if (isEmail) {
+                // Standard local verification for email
+                if (otp.otp !== otpCode) {
+                    otp.attempts += 1;
+                    await otp.save();
+
+                    // Audit Log: Record failed verification (invalid code)
+                    if (adminId) {
+                        try {
+                            await this.createCustomerNote({
+                                customerId: customer._id,
+                                noteType: 'Verification',
+                                priority: 'High',
+                                content: `Identity verification via Email failed. Reason: Invalid code.`,
+                                tags: ['verification', 'otp', 'failed'],
+                                createdBy: adminId
+                            });
+                        } catch (noteErr) {
+                            console.error('Failed to create audit note for verifyOTP email failure:', noteErr);
+                        }
+                    }
+
+                    throw new Error('Invalid OTP code');
+                }
             }
 
             if (!otp.isValid()) {
@@ -180,6 +280,23 @@ class CustomerVerificationService {
                 },
                 { upsert: true, new: true }
             );
+
+            // Audit Log: Record successful verification
+            if (adminId) {
+                try {
+                    const method = otp.channel === 'sms' ? 'SMS' : 'Email';
+                    await this.createCustomerNote({
+                        customerId: customer._id,
+                        noteType: 'Verification',
+                        priority: 'Normal',
+                        content: `Identity verification ${method === 'SMS' ? 'via SMS' : 'via Email'} successful.`,
+                        tags: ['verification', 'otp', 'success'],
+                        createdBy: adminId
+                    });
+                } catch (noteErr) {
+                    console.error('Failed to create audit note for verifyOTP success:', noteErr);
+                }
+            }
 
             return verification.toSafeJSON();
         } catch (error) {
@@ -216,6 +333,22 @@ class CustomerVerificationService {
                 },
                 { upsert: true, new: true }
             );
+
+            // Audit Log: Record manual verification
+            if (adminId) {
+                try {
+                    await this.createCustomerNote({
+                        customerId: customer._id,
+                        noteType: 'Verification',
+                        priority: 'Normal',
+                        content: `Identity verified manually by staff. Notes: ${adminNotes || 'None'}`,
+                        tags: ['verification', 'manual', 'success'],
+                        createdBy: adminId
+                    });
+                } catch (noteErr) {
+                    console.error('Failed to create audit note for manualVerification:', noteErr);
+                }
+            }
 
             return verification.toSafeJSON();
         } catch (error) {
@@ -579,26 +712,38 @@ class CustomerVerificationService {
                 nextBillDueDate = dueDate;
             }
 
-            // Calculate account balance
-            // In the frontend: negative = Credit (CR), positive = Debit (DR)
-            // BillingAccount.currentBalance represents amount owed (positive) or credit (negative)
-            // Since the schema has min: 0, we'll treat:
-            // - Positive balance = Debit (amount owed)
-            // - Zero balance = No balance
-            // - For credits, we'd need to track overpayments separately or allow negative balances
-            // For now, we'll return balance as positive (debit) if > 0
+            // Get account balance
             const rawBalance = billingAccount.currentBalance || 0;
-
-            // If balance is 0, return 0 (no balance)
-            // If balance > 0, return as positive (debit/amount owed)
-            // Note: Credits would need separate tracking or negative balance support
             const accountBalance = rawBalance;
+
+            // Get recent manual charges
+            const manualCharges = await Invoice.find({
+                customerId,
+                $or: [
+                    { 'metadata.type': 'manual_charge' },
+                    { notes: { $regex: 'Manual charge processed by admin:', $options: 'i' } }
+                ]
+            })
+                .sort({ createdAt: -1 })
+                .limit(5)
+                .lean();
+
+            const charges = manualCharges.map(inv => ({
+                id: inv._id.toString(),
+                amount: inv.total,
+                description: inv.lineItems[0]?.description || 'Manual Charge',
+                status: inv.status,
+                appliedAt: inv.createdAt,
+                invoiceNumber: inv.invoiceNumber
+            }));
 
             return {
                 accountBalance: accountBalance, // Positive = Debit (amount owed), Negative = Credit (overpayment)
                 nextBillDueDate: nextBillDueDate ? nextBillDueDate.toISOString() : null,
                 autoPayStatus: billingAccount.autoPayEnabled || customer.autoPayEnabled ? 'Active' : 'Inactive',
                 paymentMethod: paymentMethodDisplay,
+                credits: billingAccount.metadata?.credits || [],
+                charges: charges,
             };
         } catch (error) {
             throw new Error(`Failed to fetch customer financial data: ${error.message}`);
@@ -659,6 +804,80 @@ class CustomerVerificationService {
             }));
         } catch (error) {
             throw new Error(`Failed to fetch notes: ${error.message}`);
+        }
+    }
+
+    // Get authorised representatives
+    async getAuthorisedReps(customerId) {
+        try {
+            const user = await User.findById(customerId).select('authorisedRepresentatives');
+            if (!user) {
+                throw new Error('Customer not found');
+            }
+            return user.authorisedRepresentatives || [];
+        } catch (error) {
+            throw new Error(`Failed to fetch authorised representatives: ${error.message}`);
+        }
+    }
+
+    // Add authorised representative
+    async addAuthorisedRep(customerId, repData) {
+        try {
+            const user = await User.findById(customerId);
+            if (!user) {
+                throw new Error('Customer not found');
+            }
+
+            if (user.authorisedRepresentatives && user.authorisedRepresentatives.length >= 3) {
+                throw new Error('Maximum of 3 authorised representatives allowed');
+            }
+
+            user.authorisedRepresentatives.push({
+                ...repData,
+                createdAt: new Date()
+            });
+
+            await user.save();
+            return user.authorisedRepresentatives;
+        } catch (error) {
+            throw new Error(`Failed to add authorised representative: ${error.message}`);
+        }
+    }
+
+    // Update authorised representative
+    async updateAuthorisedRep(customerId, repId, repData) {
+        try {
+            const user = await User.findById(customerId);
+            if (!user) {
+                throw new Error('Customer not found');
+            }
+
+            const rep = user.authorisedRepresentatives.id(repId);
+            if (!rep) {
+                throw new Error('Authorised representative not found');
+            }
+
+            Object.assign(rep, repData);
+            await user.save();
+            return user.authorisedRepresentatives;
+        } catch (error) {
+            throw new Error(`Failed to update authorised representative: ${error.message}`);
+        }
+    }
+
+    // Remove authorised representative
+    async removeAuthorisedRep(customerId, repId) {
+        try {
+            const user = await User.findById(customerId);
+            if (!user) {
+                throw new Error('Customer not found');
+            }
+
+            user.authorisedRepresentatives.pull(repId);
+            await user.save();
+            return user.authorisedRepresentatives;
+        } catch (error) {
+            throw new Error(`Failed to remove authorised representative: ${error.message}`);
         }
     }
 }

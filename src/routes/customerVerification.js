@@ -86,5 +86,33 @@ router.get('/global-search', customerVerificationController.globalCustomerSearch
  */
 router.get('/financial/:customerId', customerVerificationController.getCustomerFinancialData);
 
+/**
+ * @route   GET /api/customer-verification/authorised-reps/:customerId
+ * @desc    Get authorised representatives for a customer
+ * @access  Private (Admin)
+ */
+router.get('/authorised-reps/:customerId', customerVerificationController.getAuthorisedReps);
+
+/**
+ * @route   POST /api/customer-verification/authorised-reps/:customerId
+ * @desc    Add an authorised representative
+ * @access  Private (Admin)
+ */
+router.post('/authorised-reps/:customerId', customerVerificationController.addAuthorisedRep);
+
+/**
+ * @route   PUT /api/customer-verification/authorised-reps/:customerId/:repId
+ * @desc    Update an authorised representative
+ * @access  Private (Admin)
+ */
+router.put('/authorised-reps/:customerId/:repId', customerVerificationController.updateAuthorisedRep);
+
+/**
+ * @route   DELETE /api/customer-verification/authorised-reps/:customerId/:repId
+ * @desc    Remove an authorised representative
+ * @access  Private (Admin)
+ */
+router.delete('/authorised-reps/:customerId/:repId', customerVerificationController.removeAuthorisedRep);
+
 module.exports = router;
 

@@ -18,6 +18,9 @@ router.put('/:id', (req, res) => roleController.updateRole(req, res));
 // DELETE /api/roles/:id
 router.delete('/:id', (req, res) => roleController.deleteRole(req, res));
 
+// GET /api/roles/:id/users
+router.get('/:id/users', (req, res) => roleController.listUsersForRole(req, res));
+
 module.exports = router;
 
 

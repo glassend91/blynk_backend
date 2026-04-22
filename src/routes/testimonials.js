@@ -2,19 +2,19 @@ const express = require('express');
 const router = express.Router();
 const testimonialController = require('../controllers/testimonialController');
 
-// Middleware to check authentication
-const { authenticateToken } = require('../middleware/auth');
-
-// Apply authentication to all routes
-router.use(authenticateToken);
-
 /**
  * @route   GET /api/testimonials
  * @desc    Get all testimonials with optional filtering
- * @access  Private (Admin)
+ * @access  Public
  * @query   published, search
  */
 router.get('/', testimonialController.getAllTestimonials);
+
+// Middleware to check authentication
+const { authenticateToken } = require('../middleware/auth');
+
+// Apply authentication to all following administrative routes
+router.use(authenticateToken);
 
 /**
  * @route   GET /api/testimonials/:id

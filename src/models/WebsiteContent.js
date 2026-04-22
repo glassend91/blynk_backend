@@ -49,7 +49,7 @@ const websiteContentSchema = new mongoose.Schema({
         type: String,
         required: true,
         unique: true,
-        enum: ['home', 'about', 'service', 'hardship', 'policies', 'help', 'seo'],
+        enum: ['home', 'about', 'service', 'hardship', 'policies', 'help', 'terms', 'privacy', 'seo'],
         trim: true
     },
     hero: {

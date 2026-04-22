@@ -72,7 +72,7 @@ class StoreController {
     // Create a new store
     async createStore(req, res) {
         try {
-            const { name, address, hours, phone, googleLink, bannerUrl, pitch, status, technicians } = req.body;
+            const { name, address, hours, phone, googleLink, bannerUrl, pitch, status, technicians, lat, lng } = req.body;
 
             if (!name || !address || !hours || !phone) {
                 return res.status(400).json({
@@ -90,7 +90,9 @@ class StoreController {
                 bannerUrl,
                 pitch,
                 status,
-                technicians
+                technicians,
+                lat,
+                lng
             });
 
             res.status(201).json({
@@ -110,7 +112,7 @@ class StoreController {
     async updateStore(req, res) {
         try {
             const { id } = req.params;
-            const { name, address, hours, phone, googleLink, bannerUrl, pitch, status, technicians } = req.body;
+            const { name, address, hours, phone, googleLink, bannerUrl, pitch, status, technicians, lat, lng } = req.body;
 
             const store = await storeService.updateStore(id, {
                 name,
@@ -121,7 +123,9 @@ class StoreController {
                 bannerUrl,
                 pitch,
                 status,
-                technicians
+                technicians,
+                lat,
+                lng
             });
 
             res.status(200).json({
