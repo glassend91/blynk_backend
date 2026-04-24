@@ -1,7 +1,69 @@
 const supportTicketService = require('../services/supportTicketService');
 const { validationResult } = require('express-validator');
+const User = require('../models/User');
 
 class SupportTicketController {
+    // Create a new support ticket
+    async createPublicTicket(req, res) {
+        try {
+            const { fullName, email, phone, subject, message, contactMethod } = req.body;
+
+            if (!fullName || !email || !subject || !message) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Missing required fields'
+                });
+            }
+
+            // Try to find user by email
+            let user = await User.findOne({ email: email.toLowerCase() });
+
+            if (!user) {
+                // Create a new guest user
+                const nameParts = fullName.split(' ');
+                const firstName = nameParts[0];
+                const lastName = nameParts.slice(1).join(' ') || 'Guest';
+
+                user = new User({
+                    firstName,
+                    lastName,
+                    email: email.toLowerCase(),
+                    phone,
+                    passwordHash: 'GUEST_USER_NO_PASSWORD',
+                    role: 'customer',
+                    status: 'Pending',
+                    type: '-',
+                    customerType: 'residential'
+                });
+                await user.save();
+            }
+
+            const description = `Preferred Contact Method: ${contactMethod || 'Email'}\nPhone Number: ${phone || 'N/A'}\n\nMessage:\n${message}`;
+
+            const ticketData = {
+                subject: subject,
+                description: description,
+                category: 'General',
+                priority: 'Medium',
+                customerId: user._id,
+                source: 'Web'
+            };
+
+            const ticket = await supportTicketService.createTicket(ticketData);
+
+            res.status(201).json({
+                success: true,
+                message: 'Support ticket submitted successfully',
+                data: ticket.toSafeJSON()
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
     // Create a new support ticket
     async createTicket(req, res) {
         try {
@@ -125,10 +187,11 @@ class SupportTicketController {
             }
 
             const { id } = req.params;
-            const updateData = req.body;
+            let updateData = req.body;
 
             // Non-admin users can only update certain fields (removed priority - only admins can set it)
-            if (req.user.role !== 'admin') {
+            const adminRoles = ['admin', 'superAdmin', 'administrator', 'support', 'supportManager', 'technicalSupport'];
+            if (!adminRoles.includes(req.user.role)) {
                 const allowedFields = ['tags']; // Removed 'priority' - customers cannot set priority
                 const filteredData = {};
                 allowedFields.forEach(field => {

@@ -134,8 +134,11 @@ class SupportTicketService {
             ticket.lastActivity = new Date();
             await ticket.save();
 
-            return await ticket.populate('customer', 'firstName lastName email')
-                .populate('assignedTo', 'firstName lastName email');
+            await ticket.populate([
+                { path: 'customer', select: 'firstName lastName email' },
+                { path: 'assignedTo', select: 'firstName lastName email' }
+            ]);
+            return ticket;
         } catch (error) {
             throw new Error(`Failed to update ticket: ${error.message}`);
         }

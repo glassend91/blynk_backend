@@ -16,6 +16,13 @@ const {
 // Middleware to check authentication
 const { authenticateToken } = require('../middleware/auth');
 
+/**
+ * @route   POST /api/support-tickets/public
+ * @desc    Create a public support ticket from contact us form
+ * @access  Public
+ */
+router.post('/public', supportTicketController.createPublicTicket);
+
 // Apply authentication to all routes
 router.use(authenticateToken);
 
