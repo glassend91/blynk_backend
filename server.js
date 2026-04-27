@@ -74,7 +74,6 @@ const port = process.env.PORT || 3000;
 
 async function startServer() {
     try {
-        console.log(' MONGO_URI set:', process.env.MONGO_URI);
         if (process.env.MONGO_URI) {
             await connectToDatabase(process.env.MONGO_URI);
             console.log('Connected to MongoDB');
