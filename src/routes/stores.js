@@ -10,6 +10,16 @@ const storeController = require('../controllers/storeController');
  */
 router.get('/', storeController.getAllStores);
 
+// Middleware to check authentication
+const { authenticateToken } = require('../middleware/auth');
+
+/**
+ * @route   GET /api/stores/statistics
+ * @desc    Get store statistics
+ * @access  Private (Admin)
+ */
+router.get('/statistics', authenticateToken, storeController.getStatistics);
+
 /**
  * @route   GET /api/stores/:id
  * @desc    Get store by ID
@@ -17,18 +27,8 @@ router.get('/', storeController.getAllStores);
  */
 router.get('/:id', storeController.getStoreById);
 
-// Middleware to check authentication
-const { authenticateToken } = require('../middleware/auth');
-
 // Apply authentication to all following administrative routes
 router.use(authenticateToken);
-
-/**
- * @route   GET /api/stores/statistics
- * @desc    Get store statistics
- * @access  Private (Admin)
- */
-router.get('/statistics', storeController.getStatistics);
 
 /**
  * @route   POST /api/stores
