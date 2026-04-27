@@ -1,6 +1,4 @@
 node_modules/
-.env
-.env.local
 npm-debug.log*
 yarn-error.log*
 dist/
@@ -8,3 +6,7 @@ build/
 coverage/
 .DS_Store
 .env.example
+temp_auto_push.bat
+temp_interactive_push.bat
+branch_structure.json
+config.bat
